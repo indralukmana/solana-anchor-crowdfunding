@@ -24,4 +24,8 @@ pub mod crowdfunding {
     pub fn withdraw(ctx: Context<Withdraw>) -> Result<()> {
         withdraw_handler(ctx)
     }
+
+    pub fn refund(ctx: Context<Refund>) -> Result<()> {
+        refund_handler(ctx)
+    }
 }

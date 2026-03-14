@@ -1,7 +1,6 @@
 use crate::error::CrowdfundError;
 use crate::state::Campaign;
 use anchor_lang::prelude::*;
-use anchor_lang::system_program;
 
 /// Handles the withdrawal of funds from a successfully completed crowdfunding campaign.
 ///
@@ -49,20 +48,9 @@ pub fn withdraw_handler(ctx: Context<Withdraw>) -> Result<()> {
     require!(!campaign.claimed, CrowdfundError::AlreadyClaimed);
 
     let amount = ctx.accounts.vault.lamports();
-    let campaign_key = campaign.key();
-    let bump = ctx.bumps.vault;
-    let seeds = &[b"vault".as_ref(), campaign_key.as_ref(), &[bump]];
-    let signer_seeds = &[&seeds[..]];
 
-    let cpi_ctx = CpiContext::new_with_signer(
-        ctx.accounts.system_program.to_account_info(),
-        system_program::Transfer {
-            from: ctx.accounts.vault.to_account_info(),
-            to: ctx.accounts.creator.to_account_info(),
-        },
-        signer_seeds,
-    );
-    system_program::transfer(cpi_ctx, amount)?;
+    **ctx.accounts.vault.try_borrow_mut_lamports()? -= amount;
+    **ctx.accounts.creator.try_borrow_mut_lamports()? += amount;
 
     campaign.claimed = true;
     msg!("Withdrawn: {} lamports", amount);
@@ -78,13 +66,13 @@ pub struct Withdraw<'info> {
     )]
     pub campaign: Account<'info, Campaign>,
 
-    /// CHECK: PDA vault, seeds verified, holds lamports only
+    /// CHECK: PDA vault owned by this program, holds lamports only
     #[account(
         mut,
         seeds = [b"vault", campaign.key().as_ref()],
-        bump
+        bump,
     )]
-    pub vault: SystemAccount<'info>,
+    pub vault: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub creator: Signer<'info>,
