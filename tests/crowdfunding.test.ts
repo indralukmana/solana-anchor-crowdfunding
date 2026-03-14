@@ -388,3 +388,184 @@ describe("Feature 3: withdraw", () => {
     ).rejects.toThrow(/AlreadyClaimed/);
   }, 15_000);
 });
+
+describe("Feature 4: refund", () => {
+  let creator: Keypair;
+  let donor: Keypair;
+  let campaignPda: PublicKey;
+  let vaultPda: PublicKey;
+
+  const setupFailedCampaign = async (deadlineOffsetSeconds = 3) => {
+    creator = Keypair.generate();
+    donor = Keypair.generate();
+    await airdrop(provider, creator.publicKey);
+    await airdrop(provider, donor.publicKey);
+
+    [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
+    [vaultPda] = getVaultPda(campaignPda, program.programId);
+
+    const goal = new BN(1_000_000_000);
+    const deadline = new BN(
+      Math.floor(Date.now() / 1000) + deadlineOffsetSeconds,
+    );
+
+    await program.methods
+      .createCampaign(goal, deadline)
+      .accountsPartial({ creator: creator.publicKey })
+      .signers([creator])
+      .rpc();
+
+    let contributeTx: string;
+    try {
+      contributeTx = await program.methods
+        .contribute(new BN(400_000_000))
+        .accountsPartial({
+          campaign: campaignPda,
+          vault: vaultPda,
+          donor: donor.publicKey,
+        })
+        .signers([donor])
+        .rpc();
+      console.log("contribute tx:", contributeTx);
+    } catch (err: any) {
+      console.error("contribute FAILED:", err.message);
+      console.error("contribute logs:", err.logs ?? "no logs");
+      throw err;
+    }
+  };
+
+  it("✅ donor gets refund after deadline when goal not met", async () => {
+    await setupFailedCampaign(4);
+    await sleep(4000);
+
+    const [contributionPda] = getContributionPda(
+      campaignPda,
+      donor.publicKey,
+      program.programId,
+    );
+
+    // Pre-state
+    const donorBalanceBefore = await provider.connection.getBalance(
+      donor.publicKey,
+    );
+    let txSig: string;
+    try {
+      txSig = await program.methods
+        .refund()
+        .accountsPartial({
+          campaign: campaignPda,
+          vault: vaultPda,
+          donor: donor.publicKey,
+        })
+        .signers([donor])
+        .rpc();
+      console.log("tx signature:", txSig);
+    } catch (err: any) {
+      console.error("--- REFUND FAILED ---");
+      console.error("error message:", err.message);
+      console.error("error logs:", err.logs ?? "no logs");
+      throw err;
+    }
+
+    // Post-state
+    const donorBalanceAfter = await provider.connection.getBalance(
+      donor.publicKey,
+    );
+
+    // verify donor got their contribution back
+    expect(donorBalanceAfter).toBeGreaterThan(donorBalanceBefore);
+
+    // Contribution account closed
+    const contribution = await program.account.contribution
+      .fetch(contributionPda)
+      .catch(() => null);
+    expect(contribution).toBeNull(); // closed by `close = donor`
+  }, 15_000);
+
+  it("❌ rejects refund before deadline", async () => {
+    await setupFailedCampaign(86400); // deadline tomorrow
+
+    await expect(
+      program.methods
+        .refund()
+        .accountsPartial({
+          campaign: campaignPda,
+          vault: vaultPda,
+          donor: donor.publicKey,
+        })
+        .signers([donor])
+        .rpc(),
+    ).rejects.toThrow(/DeadlineNotReached/);
+  });
+
+  it("❌ rejects refund when goal was met", async () => {
+    creator = Keypair.generate();
+    donor = Keypair.generate();
+    await airdrop(provider, creator.publicKey);
+    await airdrop(provider, donor.publicKey);
+
+    [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
+    [vaultPda] = getVaultPda(campaignPda, program.programId);
+
+    const goal = new BN(500_000_000);
+    const deadline = new BN(Math.floor(Date.now() / 1000) + 3);
+
+    await program.methods
+      .createCampaign(goal, deadline)
+      .accountsPartial({ creator: creator.publicKey })
+      .signers([creator])
+      .rpc();
+
+    // Fill the goal
+    await program.methods
+      .contribute(new BN(500_000_000))
+      .accountsPartial({
+        campaign: campaignPda,
+        vault: vaultPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
+
+    await sleep(4000);
+
+    await expect(
+      program.methods
+        .refund()
+        .accountsPartial({
+          campaign: campaignPda,
+          vault: vaultPda,
+          donor: donor.publicKey,
+        })
+        .signers([donor])
+        .rpc(),
+    ).rejects.toThrow(/GoalAlreadyReached/);
+  }, 15_000);
+
+  it("❌ rejects double refund", async () => {
+    await setupFailedCampaign(3);
+    await sleep(4000);
+
+    await program.methods
+      .refund()
+      .accountsPartial({
+        campaign: campaignPda,
+        vault: vaultPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
+
+    await expect(
+      program.methods
+        .refund()
+        .accountsPartial({
+          campaign: campaignPda,
+          vault: vaultPda,
+          donor: donor.publicKey,
+        })
+        .signers([donor])
+        .rpc(),
+    ).rejects.toThrow(/AccountNotInitialized|AccountDiscriminatorNotFound/);
+  }, 15_000);
+});
