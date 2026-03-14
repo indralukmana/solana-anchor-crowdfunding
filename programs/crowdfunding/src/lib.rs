@@ -20,4 +20,8 @@ pub mod crowdfunding {
     pub fn contribute(ctx: Context<Contribute>, amount: u64) -> Result<()> {
         contribute_handler(ctx, amount)
     }
+
+    pub fn withdraw(ctx: Context<Withdraw>) -> Result<()> {
+        withdraw_handler(ctx)
+    }
 }
