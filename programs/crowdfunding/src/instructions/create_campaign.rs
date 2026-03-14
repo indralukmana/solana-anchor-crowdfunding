@@ -2,6 +2,27 @@ use anchor_lang::prelude::*;
 use crate::state::Campaign;
 use crate::error::CrowdfundError;
 
+/// Handler for creating a new crowdfunding campaign.
+///
+/// This function initializes a new `Campaign` account with the specified goal and deadline.
+/// It ensures that the deadline is set in the future relative to the current blockchain timestamp.
+/// The campaign is associated with the creator's public key and is initialized with zero funds raised.
+///
+/// # Arguments
+///
+/// * `ctx` - The context containing all accounts required for campaign creation.
+/// * `goal` - The funding goal for the campaign (in lamports).
+/// * `deadline` - The UNIX timestamp by which the campaign must reach its goal.
+///
+/// # Errors
+///
+/// Returns a `CrowdfundError::InvalidDeadline` if the provided deadline is not in the future.
+///
+/// # Example
+///
+/// ```ignore
+/// create_campaign_handler(ctx, 1_000_000, 1_700_000_000)?;
+/// ```
 pub fn create_campaign_handler(ctx: Context<CreateCampaign>, goal: u64, deadline: i64) -> Result<()> {
     let clock = Clock::get()?;
 
