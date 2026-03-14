@@ -39,7 +39,7 @@ pub fn contribute_handler(ctx: Context<Contribute>, amount: u64) -> Result<()> {
     // Transfer only the effective amount to avoid overfunding
     let cpi_accounts = anchor_lang::system_program::Transfer {
         from: ctx.accounts.donor.to_account_info(),
-        to: campaign.to_account_info(),
+        to: ctx.accounts.vault.to_account_info(),
     };
     let cpi_ctx = CpiContext::new(ctx.accounts.system_program.to_account_info(), cpi_accounts);
     system_program::transfer(cpi_ctx, effective_amount)?;
@@ -71,13 +71,15 @@ pub struct Contribute<'info> {
     )]
     pub campaign: Account<'info, Campaign>,
 
-    // CHECK: PDA vault, seeds verified, hold lamports only
+    /// CHECK: PDA vault owned by this program, holds lamports only
     #[account(
-        mut,
+        init_if_needed,
+        payer = donor,
+        space = 0,
         seeds = [b"vault", campaign.key().as_ref()],
         bump,
     )]
-    pub vault: SystemAccount<'info>,
+    pub vault: UncheckedAccount<'info>,
 
     #[account(
         init_if_needed,
