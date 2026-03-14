@@ -3,6 +3,25 @@ use crate::state::{Campaign, Contribution};
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
+/// Handles a contribution to a crowdfunding campaign.
+///
+/// This handler performs the following steps:
+/// 1. Checks that the campaign deadline has not passed.
+/// 2. Calculates the effective contribution amount, ensuring the campaign is not overfunded.
+/// 3. Transfers the effective amount of lamports from the donor to the campaign's account.
+/// 4. Updates the campaign's raised amount.
+/// 5. Initializes or updates the donor's contribution account for this campaign.
+///
+/// # Arguments
+/// * `ctx` - The context containing all relevant accounts for the contribution.
+/// * `amount` - The amount of lamports the donor wishes to contribute.
+///
+/// # Errors
+/// Returns an error if:
+/// - The campaign deadline has passed.
+/// - The campaign goal has already been reached.
+/// - The transfer of lamports fails.
+///
 pub fn contribute_handler(ctx: Context<Contribute>, amount: u64) -> Result<()> {
     let clock = Clock::get()?;
     let campaign = &mut ctx.accounts.campaign;
