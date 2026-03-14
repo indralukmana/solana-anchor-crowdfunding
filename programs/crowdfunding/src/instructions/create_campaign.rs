@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use crate::state::Campaign;
+use crate::state::{Campaign};
 use crate::error::CrowdfundError;
 
 /// Handler for creating a new crowdfunding campaign.
@@ -37,6 +37,8 @@ pub fn create_campaign_handler(ctx: Context<CreateCampaign>, goal: u64, deadline
     campaign.claimed = false;
     campaign.bump = ctx.bumps.campaign;
 
+
+
     msg!("Campaign created with goal: {} and deadline: {}", goal, deadline);
 
     Ok(())
@@ -52,6 +54,7 @@ pub struct CreateCampaign<'info> {
         bump
     )]
     pub campaign: Account<'info, Campaign>,
+
 
     #[account(mut)]
     pub creator: Signer<'info>,
