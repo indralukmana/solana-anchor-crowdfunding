@@ -7,7 +7,7 @@ use anchor_lang::prelude::*;
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("HysEQZD4Uz2v97vpPrysELouuHCMpmn98YwKfJ9u77XD");
+declare_id!("3qUXqi2J3W9juVRqZNrwjpH9WPfzx8wHaPAboXVJVPpp");
 
 #[program]
 pub mod crowdfunding {
