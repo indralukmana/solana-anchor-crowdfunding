@@ -7,58 +7,64 @@ use anchor_lang::system_program;
 ///
 /// This handler performs the following steps:
 /// 1. Checks that the campaign deadline has not passed.
-/// 2. Calculates the effective contribution amount, ensuring the campaign is not overfunded.
-/// 3. Transfers the effective amount of lamports from the donor to the campaign's account.
-/// 4. Updates the campaign's raised amount.
-/// 5. Initializes or updates the donor's contribution account for this campaign.
+/// 2. Calculates the remaining amount needed to reach the campaign goal,
+///    and ensures the contribution does not exceed this amount.
+/// 3. Transfers the effective contribution amount from the donor to the campaign's vault.
+/// 4. Updates the campaign's raised amount and the donor's contribution record.
 ///
 /// # Arguments
-/// * `ctx` - The context containing all relevant accounts for the contribution.
-/// * `amount` - The amount of lamports the donor wishes to contribute.
+/// * `ctx` - The context containing all accounts required for the contribution.
+/// * `amount` - The amount (in lamports) the donor wishes to contribute.
 ///
 /// # Errors
-/// Returns an error if:
-/// - The campaign deadline has passed.
-/// - The campaign goal has already been reached.
-/// - The transfer of lamports fails.
+/// Returns a [`CrowdfundError::DeadlinePassed`] if the campaign deadline has passed.
+/// Returns a [`CrowdfundError::GoalAlreadyReached`] if the campaign goal has already been met.
 ///
+/// # Events
+/// Emits a log message with the contributed amount and the new total raised.
 pub fn contribute_handler(ctx: Context<Contribute>, amount: u64) -> Result<()> {
     let clock = Clock::get()?;
-    let campaign = &mut ctx.accounts.campaign;
+
+    let deadline = ctx.accounts.campaign.deadline;
+    let goal = ctx.accounts.campaign.goal;
+    let raised = ctx.accounts.campaign.raised;
+    let campaign_key = ctx.accounts.campaign.key();
+    let donor_key = ctx.accounts.donor.key();
 
     require!(
-        clock.unix_timestamp < campaign.deadline,
+        clock.unix_timestamp < deadline,
         CrowdfundError::DeadlinePassed
     );
 
-    let remaining = campaign.goal.saturating_sub(campaign.raised);
+    let remaining = goal.saturating_sub(raised);
     let effective_amount = amount.min(remaining);
-
     require!(effective_amount > 0, CrowdfundError::GoalAlreadyReached);
 
-    // Transfer only the effective amount to avoid overfunding
-    let cpi_accounts = anchor_lang::system_program::Transfer {
-        from: ctx.accounts.donor.to_account_info(),
-        to: ctx.accounts.vault.to_account_info(),
-    };
-    let cpi_ctx = CpiContext::new(ctx.accounts.system_program.to_account_info(), cpi_accounts);
-    system_program::transfer(cpi_ctx, effective_amount)?;
+    system_program::transfer(
+        CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.donor.to_account_info(),
+                to: ctx.accounts.vault.to_account_info(),
+            },
+        ),
+        effective_amount,
+    )?;
 
-    // Update campaign state
-    campaign.raised += effective_amount;
-
-    let contribution = &mut ctx.accounts.contribution;
-    // Initialize contribution account
-    contribution.donor = ctx.accounts.donor.key();
-    contribution.amount = contribution.amount.saturating_add(effective_amount);
-    contribution.campaign = campaign.key();
+    ctx.accounts.campaign.raised = raised.saturating_add(effective_amount);
+    ctx.accounts.contribution.donor = donor_key;
+    ctx.accounts.contribution.campaign = campaign_key;
+    ctx.accounts.contribution.amount = ctx
+        .accounts
+        .contribution
+        .amount
+        .saturating_add(effective_amount);
 
     msg!(
-        "Contribution of {} lamports made to campaign by {}",
+        "Contributed: {} lamports, total={}",
         effective_amount,
-        ctx.accounts.donor.key()
+        ctx.accounts.campaign.raised
     );
-
     Ok(())
 }
 
@@ -71,16 +77,6 @@ pub struct Contribute<'info> {
     )]
     pub campaign: Account<'info, Campaign>,
 
-    /// CHECK: PDA vault owned by this program, holds lamports only
-    #[account(
-        init_if_needed,
-        payer = donor,
-        space = 0,
-        seeds = [b"vault", campaign.key().as_ref()],
-        bump,
-    )]
-    pub vault: UncheckedAccount<'info>,
-
     #[account(
         init_if_needed,
         payer = donor,
@@ -90,8 +86,15 @@ pub struct Contribute<'info> {
     )]
     pub contribution: Account<'info, Contribution>,
 
+    /// CHECK: system-owned PDA vault, seeds verified — system program creates on first transfer
+    #[account(
+        mut,
+        seeds = [b"vault", campaign.key().as_ref()],
+        bump,
+    )]
+    pub vault: UncheckedAccount<'info>,
+
     #[account(mut)]
     pub donor: Signer<'info>,
-
     pub system_program: Program<'info, System>,
 }

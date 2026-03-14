@@ -3,7 +3,7 @@ import { AnchorProvider, BN, Program } from "@coral-xyz/anchor";
 import { Crowdfunding } from "../target/types/crowdfunding";
 import { Keypair, PublicKey } from "@solana/web3.js";
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -38,7 +38,7 @@ const getContributionPda = (
     programId,
   );
 
-// ── Shared setup ─────────────────────────────────────────────────────────────
+// ── Shared setup ──────────────────────────────────────────────────────────────
 
 const provider = AnchorProvider.env();
 anchor.setProvider(provider);
@@ -50,6 +50,7 @@ describe("Feature 1: create_campaign", () => {
   it("✅ creates a campaign with valid deadline", async () => {
     const creator = Keypair.generate();
     await airdrop(provider, creator.publicKey);
+
     const [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
 
     const goal = new BN(1_000_000_000);
@@ -57,7 +58,10 @@ describe("Feature 1: create_campaign", () => {
 
     await program.methods
       .createCampaign(goal, deadline)
-      .accountsPartial({ creator: creator.publicKey })
+      .accountsPartial({
+        creator: creator.publicKey,
+        campaign: campaignPda,
+      })
       .signers([creator])
       .rpc();
 
@@ -72,13 +76,18 @@ describe("Feature 1: create_campaign", () => {
     const creator = Keypair.generate();
     await airdrop(provider, creator.publicKey);
 
+    const [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
+
     const goal = new BN(1_000_000_000);
     const pastDeadline = new BN(Math.floor(Date.now() / 1000) - 86400);
 
     await expect(
       program.methods
         .createCampaign(goal, pastDeadline)
-        .accountsPartial({ creator: creator.publicKey })
+        .accountsPartial({
+          creator: creator.publicKey,
+          campaign: campaignPda,
+        })
         .signers([creator])
         .rpc(),
     ).rejects.toThrow(/InvalidDeadline/);
@@ -95,6 +104,7 @@ describe("Feature 2: contribute", () => {
   beforeEach(async () => {
     creator = Keypair.generate();
     await airdrop(provider, creator.publicKey);
+
     [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
     [vaultPda] = getVaultPda(campaignPda, program.programId);
 
@@ -103,7 +113,10 @@ describe("Feature 2: contribute", () => {
 
     await program.methods
       .createCampaign(goal, deadline)
-      .accountsPartial({ creator: creator.publicKey })
+      .accountsPartial({
+        creator: creator.publicKey,
+        campaign: campaignPda,
+      })
       .signers([creator])
       .rpc();
   });
@@ -111,6 +124,7 @@ describe("Feature 2: contribute", () => {
   it("✅ contributes below goal, updates raised and contribution PDA", async () => {
     const donor = Keypair.generate();
     await airdrop(provider, donor.publicKey);
+
     const [contributionPda] = getContributionPda(
       campaignPda,
       donor.publicKey,
@@ -134,11 +148,16 @@ describe("Feature 2: contribute", () => {
       contributionPda,
     );
     expect(contribution.amount.toNumber()).toBe(400_000_000);
+
+    // Vault is a bare PDA — verify it holds the lamports
+    const vaultBalance = await provider.connection.getBalance(vaultPda);
+    expect(vaultBalance).toBe(400_000_000);
   });
 
   it("✅ same donor contributes twice, amount accumulates", async () => {
     const donor = Keypair.generate();
     await airdrop(provider, donor.publicKey);
+
     const [contributionPda] = getContributionPda(
       campaignPda,
       donor.publicKey,
@@ -169,11 +188,20 @@ describe("Feature 2: contribute", () => {
       contributionPda,
     );
     expect(contribution.amount.toNumber()).toBe(600_000_000);
+
+    const vaultBalance = await provider.connection.getBalance(vaultPda);
+    expect(vaultBalance).toBe(600_000_000);
   });
 
   it("✅ contribution capped when overshooting goal", async () => {
     const donor = Keypair.generate();
     await airdrop(provider, donor.publicKey);
+
+    const [contributionPda] = getContributionPda(
+      campaignPda,
+      donor.publicKey,
+      program.programId,
+    );
 
     await program.methods
       .contribute(new BN(1_500_000_000))
@@ -187,6 +215,16 @@ describe("Feature 2: contribute", () => {
 
     const campaign = await program.account.campaign.fetch(campaignPda);
     expect(campaign.raised.toNumber()).toBe(1_000_000_000);
+
+    // Contribution PDA records capped amount, not the sent 1.5 SOL
+    const contribution = await program.account.contribution.fetch(
+      contributionPda,
+    );
+    expect(contribution.amount.toNumber()).toBe(1_000_000_000);
+
+    // Vault holds exactly the goal amount
+    const vaultBalance = await provider.connection.getBalance(vaultPda);
+    expect(vaultBalance).toBe(1_000_000_000);
   });
 
   it("❌ rejects contribution when goal already met", async () => {
@@ -215,32 +253,33 @@ describe("Feature 2: contribute", () => {
         .rpc(),
     ).rejects.toThrow(/GoalAlreadyReached/);
   });
-
-  it("❌ rejects contribution after deadline — requires clock warp, skipped", async () => {
-    console.warn("⚠️  Skipped: requires validator clock manipulation");
-  });
 });
+
+// ── Feature 3: withdraw ───────────────────────────────────────────────────────
 
 describe("Feature 3: withdraw", () => {
   let creator: Keypair;
   let campaignPda: PublicKey;
   let vaultPda: PublicKey;
 
-  // Creates a campaign with a short deadline and fills the goal
   const setupFilledCampaign = async (deadlineOffsetSeconds = 3) => {
     creator = Keypair.generate();
     await airdrop(provider, creator.publicKey);
+
     [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
     [vaultPda] = getVaultPda(campaignPda, program.programId);
 
-    const goal = new BN(500_000_000); // 0.5 SOL
+    const goal = new BN(500_000_000);
     const deadline = new BN(
       Math.floor(Date.now() / 1000) + deadlineOffsetSeconds,
     );
 
     await program.methods
       .createCampaign(goal, deadline)
-      .accountsPartial({ creator: creator.publicKey })
+      .accountsPartial({
+        creator: creator.publicKey,
+        campaign: campaignPda,
+      })
       .signers([creator])
       .rpc();
 
@@ -256,11 +295,17 @@ describe("Feature 3: withdraw", () => {
       })
       .signers([donor])
       .rpc();
+
+    return { donor };
   };
 
   it("✅ creator withdraws after deadline when goal met", async () => {
     await setupFilledCampaign(3);
-    await sleep(4000);
+    await sleep(5000);
+
+    const creatorBalanceBefore = await provider.connection.getBalance(
+      creator.publicKey,
+    );
 
     await program.methods
       .withdraw()
@@ -272,17 +317,21 @@ describe("Feature 3: withdraw", () => {
       .signers([creator])
       .rpc();
 
-    // Vault should be empty
-    const vaultBalance = await provider.connection.getBalance(vaultPda);
-    expect(vaultBalance).toBe(0);
+    const creatorBalanceAfter = await provider.connection.getBalance(
+      creator.publicKey,
+    );
+    expect(creatorBalanceAfter).toBeGreaterThan(creatorBalanceBefore);
 
-    // Campaign marked as claimed
     const campaign = await program.account.campaign.fetch(campaignPda);
     expect(campaign.claimed).toBe(true);
+
+    // Vault fully drained — bare PDA with no lamports no longer exists
+    const vaultBalance = await provider.connection.getBalance(vaultPda);
+    expect(vaultBalance).toBe(0);
   }, 15_000);
 
   it("❌ rejects withdraw before deadline", async () => {
-    await setupFilledCampaign(86400); // deadline is tomorrow
+    await setupFilledCampaign(86400);
 
     await expect(
       program.methods
@@ -300,6 +349,7 @@ describe("Feature 3: withdraw", () => {
   it("❌ rejects withdraw when goal not met", async () => {
     creator = Keypair.generate();
     await airdrop(provider, creator.publicKey);
+
     [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
     [vaultPda] = getVaultPda(campaignPda, program.programId);
 
@@ -308,14 +358,16 @@ describe("Feature 3: withdraw", () => {
 
     await program.methods
       .createCampaign(goal, deadline)
-      .accountsPartial({ creator: creator.publicKey })
+      .accountsPartial({
+        creator: creator.publicKey,
+        campaign: campaignPda,
+      })
       .signers([creator])
       .rpc();
 
     const donor = Keypair.generate();
     await airdrop(provider, donor.publicKey);
 
-    // Only contribute half
     await program.methods
       .contribute(new BN(400_000_000))
       .accountsPartial({
@@ -326,7 +378,7 @@ describe("Feature 3: withdraw", () => {
       .signers([donor])
       .rpc();
 
-    await sleep(4000);
+    await sleep(5000);
 
     await expect(
       program.methods
@@ -343,7 +395,7 @@ describe("Feature 3: withdraw", () => {
 
   it("❌ rejects withdraw from non-creator", async () => {
     await setupFilledCampaign(3);
-    await sleep(4000);
+    await sleep(5000);
 
     const nonCreator = Keypair.generate();
     await airdrop(provider, nonCreator.publicKey);
@@ -363,7 +415,7 @@ describe("Feature 3: withdraw", () => {
 
   it("❌ rejects double withdraw", async () => {
     await setupFilledCampaign(3);
-    await sleep(4000);
+    await sleep(5000);
 
     await program.methods
       .withdraw()
@@ -389,6 +441,8 @@ describe("Feature 3: withdraw", () => {
   }, 15_000);
 });
 
+// ── Feature 4: refund ─────────────────────────────────────────────────────────
+
 describe("Feature 4: refund", () => {
   let creator: Keypair;
   let donor: Keypair;
@@ -411,32 +465,27 @@ describe("Feature 4: refund", () => {
 
     await program.methods
       .createCampaign(goal, deadline)
-      .accountsPartial({ creator: creator.publicKey })
+      .accountsPartial({
+        creator: creator.publicKey,
+        campaign: campaignPda,
+      })
       .signers([creator])
       .rpc();
 
-    let contributeTx: string;
-    try {
-      contributeTx = await program.methods
-        .contribute(new BN(400_000_000))
-        .accountsPartial({
-          campaign: campaignPda,
-          vault: vaultPda,
-          donor: donor.publicKey,
-        })
-        .signers([donor])
-        .rpc();
-      console.log("contribute tx:", contributeTx);
-    } catch (err: any) {
-      console.error("contribute FAILED:", err.message);
-      console.error("contribute logs:", err.logs ?? "no logs");
-      throw err;
-    }
+    await program.methods
+      .contribute(new BN(400_000_000))
+      .accountsPartial({
+        campaign: campaignPda,
+        vault: vaultPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
   };
 
   it("✅ donor gets refund after deadline when goal not met", async () => {
-    await setupFailedCampaign(4);
-    await sleep(4000);
+    await setupFailedCampaign(3);
+    await sleep(5000);
 
     const [contributionPda] = getContributionPda(
       campaignPda,
@@ -444,46 +493,38 @@ describe("Feature 4: refund", () => {
       program.programId,
     );
 
-    // Pre-state
     const donorBalanceBefore = await provider.connection.getBalance(
       donor.publicKey,
     );
-    let txSig: string;
-    try {
-      txSig = await program.methods
-        .refund()
-        .accountsPartial({
-          campaign: campaignPda,
-          vault: vaultPda,
-          donor: donor.publicKey,
-        })
-        .signers([donor])
-        .rpc();
-      console.log("tx signature:", txSig);
-    } catch (err: any) {
-      console.error("--- REFUND FAILED ---");
-      console.error("error message:", err.message);
-      console.error("error logs:", err.logs ?? "no logs");
-      throw err;
-    }
 
-    // Post-state
+    await program.methods
+      .refund()
+      .accountsPartial({
+        campaign: campaignPda,
+        vault: vaultPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
+
     const donorBalanceAfter = await provider.connection.getBalance(
       donor.publicKey,
     );
-
-    // verify donor got their contribution back
     expect(donorBalanceAfter).toBeGreaterThan(donorBalanceBefore);
 
-    // Contribution account closed
+    // Vault fully drained
+    const vaultBalance = await provider.connection.getBalance(vaultPda);
+    expect(vaultBalance).toBe(0);
+
+    // Contribution account closed by `close = donor`
     const contribution = await program.account.contribution
       .fetch(contributionPda)
       .catch(() => null);
-    expect(contribution).toBeNull(); // closed by `close = donor`
+    expect(contribution).toBeNull();
   }, 15_000);
 
   it("❌ rejects refund before deadline", async () => {
-    await setupFailedCampaign(86400); // deadline tomorrow
+    await setupFailedCampaign(86400);
 
     await expect(
       program.methods
@@ -512,11 +553,13 @@ describe("Feature 4: refund", () => {
 
     await program.methods
       .createCampaign(goal, deadline)
-      .accountsPartial({ creator: creator.publicKey })
+      .accountsPartial({
+        creator: creator.publicKey,
+        campaign: campaignPda,
+      })
       .signers([creator])
       .rpc();
 
-    // Fill the goal
     await program.methods
       .contribute(new BN(500_000_000))
       .accountsPartial({
@@ -527,7 +570,7 @@ describe("Feature 4: refund", () => {
       .signers([donor])
       .rpc();
 
-    await sleep(4000);
+    await sleep(5000);
 
     await expect(
       program.methods
@@ -542,9 +585,30 @@ describe("Feature 4: refund", () => {
     ).rejects.toThrow(/GoalAlreadyReached/);
   }, 15_000);
 
+  it("❌ rejects refund from non-donor", async () => {
+    await setupFailedCampaign(3);
+    await sleep(5000);
+
+    const nonDonor = Keypair.generate();
+    await airdrop(provider, nonDonor.publicKey);
+
+    // nonDonor has no contribution PDA — constraint rejects immediately
+    await expect(
+      program.methods
+        .refund()
+        .accountsPartial({
+          campaign: campaignPda,
+          vault: vaultPda,
+          donor: nonDonor.publicKey,
+        })
+        .signers([nonDonor])
+        .rpc(),
+    ).rejects.toThrow(/AccountNotInitialized|AccountDiscriminatorNotFound/);
+  }, 15_000);
+
   it("❌ rejects double refund", async () => {
     await setupFailedCampaign(3);
-    await sleep(4000);
+    await sleep(5000);
 
     await program.methods
       .refund()
@@ -556,6 +620,7 @@ describe("Feature 4: refund", () => {
       .signers([donor])
       .rpc();
 
+    // Contribution PDA closed — second call finds no account
     await expect(
       program.methods
         .refund()
