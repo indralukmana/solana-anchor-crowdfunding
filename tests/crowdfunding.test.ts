@@ -5,6 +5,8 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 const airdrop = async (provider: AnchorProvider, pubkey: PublicKey) => {
   const sig = await provider.connection.requestAirdrop(pubkey, 2_000_000_000);
   const latestBlockhash = await provider.connection.getLatestBlockhash();
@@ -217,4 +219,172 @@ describe("Feature 2: contribute", () => {
   it("❌ rejects contribution after deadline — requires clock warp, skipped", async () => {
     console.warn("⚠️  Skipped: requires validator clock manipulation");
   });
+});
+
+describe("Feature 3: withdraw", () => {
+  let creator: Keypair;
+  let campaignPda: PublicKey;
+  let vaultPda: PublicKey;
+
+  // Creates a campaign with a short deadline and fills the goal
+  const setupFilledCampaign = async (deadlineOffsetSeconds = 3) => {
+    creator = Keypair.generate();
+    await airdrop(provider, creator.publicKey);
+    [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
+    [vaultPda] = getVaultPda(campaignPda, program.programId);
+
+    const goal = new BN(500_000_000); // 0.5 SOL
+    const deadline = new BN(
+      Math.floor(Date.now() / 1000) + deadlineOffsetSeconds,
+    );
+
+    await program.methods
+      .createCampaign(goal, deadline)
+      .accountsPartial({ creator: creator.publicKey })
+      .signers([creator])
+      .rpc();
+
+    const donor = Keypair.generate();
+    await airdrop(provider, donor.publicKey);
+
+    await program.methods
+      .contribute(new BN(500_000_000))
+      .accountsPartial({
+        campaign: campaignPda,
+        vault: vaultPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
+  };
+
+  it("✅ creator withdraws after deadline when goal met", async () => {
+    await setupFilledCampaign(3);
+    await sleep(4000);
+
+    await program.methods
+      .withdraw()
+      .accountsPartial({
+        creator: creator.publicKey,
+        campaign: campaignPda,
+        vault: vaultPda,
+      })
+      .signers([creator])
+      .rpc();
+
+    // Vault should be empty
+    const vaultBalance = await provider.connection.getBalance(vaultPda);
+    expect(vaultBalance).toBe(0);
+
+    // Campaign marked as claimed
+    const campaign = await program.account.campaign.fetch(campaignPda);
+    expect(campaign.claimed).toBe(true);
+  }, 15_000);
+
+  it("❌ rejects withdraw before deadline", async () => {
+    await setupFilledCampaign(86400); // deadline is tomorrow
+
+    await expect(
+      program.methods
+        .withdraw()
+        .accountsPartial({
+          creator: creator.publicKey,
+          campaign: campaignPda,
+          vault: vaultPda,
+        })
+        .signers([creator])
+        .rpc(),
+    ).rejects.toThrow(/DeadlineNotReached/);
+  });
+
+  it("❌ rejects withdraw when goal not met", async () => {
+    creator = Keypair.generate();
+    await airdrop(provider, creator.publicKey);
+    [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
+    [vaultPda] = getVaultPda(campaignPda, program.programId);
+
+    const goal = new BN(1_000_000_000);
+    const deadline = new BN(Math.floor(Date.now() / 1000) + 3);
+
+    await program.methods
+      .createCampaign(goal, deadline)
+      .accountsPartial({ creator: creator.publicKey })
+      .signers([creator])
+      .rpc();
+
+    const donor = Keypair.generate();
+    await airdrop(provider, donor.publicKey);
+
+    // Only contribute half
+    await program.methods
+      .contribute(new BN(400_000_000))
+      .accountsPartial({
+        campaign: campaignPda,
+        vault: vaultPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
+
+    await sleep(4000);
+
+    await expect(
+      program.methods
+        .withdraw()
+        .accountsPartial({
+          creator: creator.publicKey,
+          campaign: campaignPda,
+          vault: vaultPda,
+        })
+        .signers([creator])
+        .rpc(),
+    ).rejects.toThrow(/GoalNotReached/);
+  }, 15_000);
+
+  it("❌ rejects withdraw from non-creator", async () => {
+    await setupFilledCampaign(3);
+    await sleep(4000);
+
+    const nonCreator = Keypair.generate();
+    await airdrop(provider, nonCreator.publicKey);
+
+    await expect(
+      program.methods
+        .withdraw()
+        .accountsPartial({
+          creator: nonCreator.publicKey,
+          campaign: campaignPda,
+          vault: vaultPda,
+        })
+        .signers([nonCreator])
+        .rpc(),
+    ).rejects.toThrow(/Unauthorized/);
+  }, 15_000);
+
+  it("❌ rejects double withdraw", async () => {
+    await setupFilledCampaign(3);
+    await sleep(4000);
+
+    await program.methods
+      .withdraw()
+      .accountsPartial({
+        creator: creator.publicKey,
+        campaign: campaignPda,
+        vault: vaultPda,
+      })
+      .signers([creator])
+      .rpc();
+
+    await expect(
+      program.methods
+        .withdraw()
+        .accountsPartial({
+          creator: creator.publicKey,
+          campaign: campaignPda,
+          vault: vaultPda,
+        })
+        .signers([creator])
+        .rpc(),
+    ).rejects.toThrow(/AlreadyClaimed/);
+  }, 15_000);
 });
