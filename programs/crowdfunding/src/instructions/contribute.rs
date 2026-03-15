@@ -5,42 +5,29 @@ use anchor_lang::system_program;
 
 /// Handles a contribution to a crowdfunding campaign.
 ///
-/// This handler performs the following steps:
-/// 1. Checks that the campaign deadline has not passed.
-/// 2. Calculates the remaining amount needed to reach the campaign goal,
-///    and ensures the contribution does not exceed this amount.
-/// 3. Transfers the effective contribution amount from the donor to the campaign's vault.
-/// 4. Updates the campaign's raised amount and the donor's contribution record.
+/// Transfers the full requested amount from the donor to the campaign vault.
+/// Overfunding is allowed — contributions are accepted as long as the deadline
+/// has not passed. The raised amount accumulates without a ceiling.
 ///
 /// # Arguments
 /// * `ctx` - The context containing all accounts required for the contribution.
-/// * `amount` - The amount (in lamports) the donor wishes to contribute.
+/// * `amount` - The amount of lamports the donor wishes to contribute.
 ///
 /// # Errors
-/// Returns a [`CrowdfundError::DeadlinePassed`] if the campaign deadline has passed.
-/// Returns a [`CrowdfundError::GoalAlreadyReached`] if the campaign goal has already been met.
-///
-/// # Events
-/// Emits a log message with the contributed amount and the new total raised.
+/// Returns [`CrowdfundError::ZeroAmount`] if amount is zero.
+/// Returns [`CrowdfundError::DeadlinePassed`] if the campaign deadline has passed.
 pub fn contribute_handler(ctx: Context<Contribute>, amount: u64) -> Result<()> {
     let clock = Clock::get()?;
 
-    require!(amount > 0, CrowdfundError::ZeroAmount);
-
     let deadline = ctx.accounts.campaign.deadline;
-    let goal = ctx.accounts.campaign.goal;
-    let raised = ctx.accounts.campaign.raised;
     let campaign_key = ctx.accounts.campaign.key();
     let donor_key = ctx.accounts.donor.key();
 
+    require!(amount > 0, CrowdfundError::ZeroAmount);
     require!(
         clock.unix_timestamp < deadline,
         CrowdfundError::DeadlinePassed
     );
-
-    let remaining = goal.saturating_sub(raised);
-    let effective_amount = amount.min(remaining);
-    require!(effective_amount > 0, CrowdfundError::GoalAlreadyReached);
 
     system_program::transfer(
         CpiContext::new(
@@ -50,21 +37,18 @@ pub fn contribute_handler(ctx: Context<Contribute>, amount: u64) -> Result<()> {
                 to: ctx.accounts.vault.to_account_info(),
             },
         ),
-        effective_amount,
+        amount,
     )?;
 
-    ctx.accounts.campaign.raised = raised.saturating_add(effective_amount);
+    ctx.accounts.campaign.raised = ctx.accounts.campaign.raised.saturating_add(amount);
+
     ctx.accounts.contribution.donor = donor_key;
     ctx.accounts.contribution.campaign = campaign_key;
-    ctx.accounts.contribution.amount = ctx
-        .accounts
-        .contribution
-        .amount
-        .saturating_add(effective_amount);
+    ctx.accounts.contribution.amount = ctx.accounts.contribution.amount.saturating_add(amount);
 
     msg!(
-        "Contributed: {} lamports, total={}",
-        effective_amount,
+        "Contributed: {} lamports, total raised={}",
+        amount,
         ctx.accounts.campaign.raised
     );
     Ok(())

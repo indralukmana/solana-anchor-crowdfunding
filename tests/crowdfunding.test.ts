@@ -313,6 +313,8 @@ describe("Feature 1: create_campaign", () => {
 
 // ── Feature 2: contribute ─────────────────────────────────────────────────────
 
+// ── Feature 2: contribute ─────────────────────────────────────────────────────
+
 describe("Feature 2: contribute", () => {
   let creator: Keypair;
   let profilePda: PublicKey;
@@ -422,7 +424,7 @@ describe("Feature 2: contribute", () => {
     expect(vaultBalance).toBe(600_000_000);
   });
 
-  it("✅ contribution capped when overshooting goal", async () => {
+  it("✅ overfunding allowed — contribution exceeds goal", async () => {
     const donor = Keypair.generate();
     await airdrop(provider, donor.publicKey);
 
@@ -432,6 +434,7 @@ describe("Feature 2: contribute", () => {
       program.programId,
     );
 
+    // Contribute 1.5 SOL against a 1 SOL goal
     await program.methods
       .contribute(new BN(1_500_000_000))
       .accountsPartial({
@@ -442,43 +445,51 @@ describe("Feature 2: contribute", () => {
       .signers([donor])
       .rpc();
 
+    // Full amount accepted — no capping
     const campaign = await program.account.campaign.fetch(campaignPda);
-    expect(campaign.raised.toNumber()).toBe(1_000_000_000);
+    expect(campaign.raised.toNumber()).toBe(1_500_000_000);
 
     const contribution = await program.account.contribution.fetch(
       contributionPda,
     );
-    expect(contribution.amount.toNumber()).toBe(1_000_000_000);
+    expect(contribution.amount.toNumber()).toBe(1_500_000_000);
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
-    expect(vaultBalance).toBe(1_000_000_000);
+    expect(vaultBalance).toBe(1_500_000_000);
   });
 
-  it("❌ rejects contribution when goal already met", async () => {
-    const donor = Keypair.generate();
-    await airdrop(provider, donor.publicKey);
+  it("✅ multiple donors overfund, creator gets full raised amount on withdraw", async () => {
+    const donor1 = Keypair.generate();
+    const donor2 = Keypair.generate();
+    await airdrop(provider, donor1.publicKey);
+    await airdrop(provider, donor2.publicKey);
 
+    // Both donate past the 1 SOL goal
     await program.methods
-      .contribute(new BN(1_000_000_000))
+      .contribute(new BN(800_000_000))
       .accountsPartial({
         campaign: campaignPda,
         vault: vaultPda,
-        donor: donor.publicKey,
+        donor: donor1.publicKey,
       })
-      .signers([donor])
+      .signers([donor1])
       .rpc();
 
-    await expect(
-      program.methods
-        .contribute(new BN(100_000_000))
-        .accountsPartial({
-          campaign: campaignPda,
-          vault: vaultPda,
-          donor: donor.publicKey,
-        })
-        .signers([donor])
-        .rpc(),
-    ).rejects.toThrow(/GoalAlreadyReached/);
+    await program.methods
+      .contribute(new BN(800_000_000))
+      .accountsPartial({
+        campaign: campaignPda,
+        vault: vaultPda,
+        donor: donor2.publicKey,
+      })
+      .signers([donor2])
+      .rpc();
+
+    const campaign = await program.account.campaign.fetch(campaignPda);
+    expect(campaign.raised.toNumber()).toBe(1_600_000_000);
+
+    const vaultBalance = await provider.connection.getBalance(vaultPda);
+    expect(vaultBalance).toBe(1_600_000_000);
   });
 
   it("❌ rejects zero amount contribution", async () => {
@@ -497,6 +508,62 @@ describe("Feature 2: contribute", () => {
         .rpc(),
     ).rejects.toThrow(/ZeroAmount/);
   });
+
+  it("❌ rejects contribution after deadline", async () => {
+    // Create a short-deadline campaign specifically for this test
+    const shortCreator = Keypair.generate();
+    await airdrop(provider, shortCreator.publicKey);
+
+    const [shortProfilePda] = getProfilePda(
+      shortCreator.publicKey,
+      program.programId,
+    );
+    const [shortCampaignPda] = getCampaignPda(
+      shortCreator.publicKey,
+      new BN(0),
+      program.programId,
+    );
+    const [shortVaultPda] = getVaultPda(shortCampaignPda, program.programId);
+
+    await program.methods
+      .createProfile("ipfs://QmExampleHash")
+      .accountsPartial({
+        creator: shortCreator.publicKey,
+        profile: shortProfilePda,
+      })
+      .signers([shortCreator])
+      .rpc();
+
+    await program.methods
+      .createCampaign(
+        new BN(1_000_000_000),
+        new BN(Math.floor(Date.now() / 1000) + 3),
+      )
+      .accountsPartial({
+        creator: shortCreator.publicKey,
+        profile: shortProfilePda,
+        campaign: shortCampaignPda,
+      })
+      .signers([shortCreator])
+      .rpc();
+
+    await sleep(5000);
+
+    const donor = Keypair.generate();
+    await airdrop(provider, donor.publicKey);
+
+    await expect(
+      program.methods
+        .contribute(new BN(100_000_000))
+        .accountsPartial({
+          campaign: shortCampaignPda,
+          vault: shortVaultPda,
+          donor: donor.publicKey,
+        })
+        .signers([donor])
+        .rpc(),
+    ).rejects.toThrow(/DeadlinePassed/);
+  }, 15_000);
 });
 
 // ── Feature 3: withdraw ───────────────────────────────────────────────────────
@@ -846,8 +913,9 @@ describe("Feature 4: refund", () => {
       .signers([creator])
       .rpc();
 
+    // Goal is 500_000_000 — donate exactly that (or more) to trigger GoalAlreadyReached on refund
     await program.methods
-      .contribute(new BN(500_000_000))
+      .contribute(new BN(600_000_000)) // could be 500_000_000 or more, since contribution is not capped
       .accountsPartial({
         campaign: campaignPda,
         vault: vaultPda,
