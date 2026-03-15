@@ -2,6 +2,7 @@ use crate::error::CrowdfundError;
 use crate::event::CampaignCreated;
 use crate::state::{Campaign, CreatorProfile};
 use anchor_lang::prelude::*;
+use anchor_lang::system_program;
 
 /// Handles the creation of a new crowdfunding campaign.
 ///
@@ -44,6 +45,20 @@ pub fn create_campaign_handler(
         .checked_add(1)
         .ok_or(CrowdfundError::CampaignCountOverflow)?;
 
+    let rent = Rent::get()?;
+    let vault_rent = rent.minimum_balance(0);
+
+    system_program::transfer(
+        CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.creator.to_account_info(),
+                to: ctx.accounts.vault.to_account_info(),
+            },
+        ),
+        vault_rent,
+    )?;
+
     let campaign = &mut ctx.accounts.campaign;
     campaign.creator = ctx.accounts.creator.key();
     campaign.campaign_id = campaign_id;
@@ -82,6 +97,14 @@ pub struct CreateCampaign<'info> {
         bump,
     )]
     pub campaign: Account<'info, Campaign>,
+
+    /// CHECK: vault account for campaign funds, seeded with rent-exemption
+    #[account(
+        mut,
+        seeds = [b"vault", campaign.key().as_ref()],
+        bump,
+    )]
+    pub vault: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub creator: Signer<'info>,
