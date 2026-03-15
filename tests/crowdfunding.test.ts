@@ -415,6 +415,16 @@ describe("Feature 2: contribute", () => {
       program.programId,
     );
 
+    await program.methods
+      .initializeContribution()
+      .accountsPartial({
+        campaign: campaignPda,
+        contribution: contributionPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
+
     const txSig = await program.methods
       .contribute(new BN(400_000_000))
       .accountsPartial({
@@ -453,6 +463,16 @@ describe("Feature 2: contribute", () => {
       donor.publicKey,
       program.programId,
     );
+
+    await program.methods
+      .initializeContribution()
+      .accountsPartial({
+        campaign: campaignPda,
+        contribution: contributionPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
 
     await program.methods
       .contribute(new BN(300_000_000))
@@ -498,6 +518,16 @@ describe("Feature 2: contribute", () => {
       program.programId,
     );
 
+    await program.methods
+      .initializeContribution()
+      .accountsPartial({
+        campaign: campaignPda,
+        contribution: contributionPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
+
     const txSig = await program.methods
       .contribute(new BN(1_500_000_000))
       .accountsPartial({
@@ -531,6 +561,9 @@ describe("Feature 2: contribute", () => {
     await airdrop(provider, donor1.publicKey);
     await airdrop(provider, donor2.publicKey);
 
+    const [contributionPda1] = getContributionPda(campaignPda, donor1.publicKey, program.programId);
+    await program.methods.initializeContribution().accountsPartial({ campaign: campaignPda, contribution: contributionPda1, donor: donor1.publicKey }).signers([donor1]).rpc();
+
     await program.methods
       .contribute(new BN(800_000_000))
       .accountsPartial({
@@ -540,6 +573,9 @@ describe("Feature 2: contribute", () => {
       })
       .signers([donor1])
       .rpc();
+
+    const [contributionPda2] = getContributionPda(campaignPda, donor2.publicKey, program.programId);
+    await program.methods.initializeContribution().accountsPartial({ campaign: campaignPda, contribution: contributionPda2, donor: donor2.publicKey }).signers([donor2]).rpc();
 
     await program.methods
       .contribute(new BN(800_000_000))
@@ -561,6 +597,9 @@ describe("Feature 2: contribute", () => {
   it("❌ rejects zero amount contribution", async () => {
     const donor = Keypair.generate();
     await airdrop(provider, donor.publicKey);
+
+    const [contributionPda] = getContributionPda(campaignPda, donor.publicKey, program.programId);
+    await program.methods.initializeContribution().accountsPartial({ campaign: campaignPda, contribution: contributionPda, donor: donor.publicKey }).signers([donor]).rpc();
 
     await expect(
       program.methods
@@ -617,6 +656,9 @@ describe("Feature 2: contribute", () => {
     const donor = Keypair.generate();
     await airdrop(provider, donor.publicKey);
 
+    const [contributionPda] = getContributionPda(shortCampaignPda, donor.publicKey, program.programId);
+    await program.methods.initializeContribution().accountsPartial({ campaign: shortCampaignPda, contribution: contributionPda, donor: donor.publicKey }).signers([donor]).rpc();
+
     await expect(
       program.methods
         .contribute(new BN(100_000_000))
@@ -672,6 +714,9 @@ describe("Feature 3: withdraw", () => {
 
     const donor = Keypair.generate();
     await airdrop(provider, donor.publicKey);
+
+    const [contributionPda] = getContributionPda(campaignPda, donor.publicKey, program.programId);
+    await program.methods.initializeContribution().accountsPartial({ campaign: campaignPda, contribution: contributionPda, donor: donor.publicKey }).signers([donor]).rpc();
 
     await program.methods
       .contribute(new BN(500_000_000))
@@ -771,6 +816,9 @@ describe("Feature 3: withdraw", () => {
 
     const donor = Keypair.generate();
     await airdrop(provider, donor.publicKey);
+
+    const [contributionPda] = getContributionPda(campaignPda, donor.publicKey, program.programId);
+    await program.methods.initializeContribution().accountsPartial({ campaign: campaignPda, contribution: contributionPda, donor: donor.publicKey }).signers([donor]).rpc();
 
     await program.methods
       .contribute(new BN(400_000_000))
@@ -887,6 +935,9 @@ describe("Feature 4: refund", () => {
       .signers([creator])
       .rpc();
 
+    const [contributionPda] = getContributionPda(campaignPda, donor.publicKey, program.programId);
+    await program.methods.initializeContribution().accountsPartial({ campaign: campaignPda, contribution: contributionPda, donor: donor.publicKey }).signers([donor]).rpc();
+
     await program.methods
       .contribute(new BN(400_000_000))
       .accountsPartial({
@@ -989,6 +1040,9 @@ describe("Feature 4: refund", () => {
       })
       .signers([creator])
       .rpc();
+
+    const [contributionPda] = getContributionPda(campaignPda, donor.publicKey, program.programId);
+    await program.methods.initializeContribution().accountsPartial({ campaign: campaignPda, contribution: contributionPda, donor: donor.publicKey }).signers([donor]).rpc();
 
     await program.methods
       .contribute(new BN(600_000_000))
