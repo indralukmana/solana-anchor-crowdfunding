@@ -18,4 +18,6 @@ pub enum CrowdfundError {
     Unauthorized,
     #[msg("Nothing to refund")]
     NothingToRefund,
+    #[msg("Metadata URI exceeds maximum length of 200 characters")]
+    UriTooLong,
 }

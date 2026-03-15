@@ -13,6 +13,10 @@ declare_id!("3qUXqi2J3W9juVRqZNrwjpH9WPfzx8wHaPAboXVJVPpp");
 pub mod crowdfunding {
     use super::*;
 
+    pub fn create_profile(ctx: Context<CreateProfile>, metadata_uri: String) -> Result<()> {
+        create_profile_handler(ctx, metadata_uri)
+    }
+
     pub fn create_campaign(ctx: Context<CreateCampaign>, goal: u64, deadline: i64) -> Result<()> {
         create_campaign_handler(ctx, goal, deadline)
     }
