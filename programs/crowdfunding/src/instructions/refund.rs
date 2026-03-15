@@ -1,4 +1,5 @@
 use crate::error::CrowdfundError;
+use crate::event::RefundIssued;
 use crate::state::{Campaign, Contribution};
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{program::invoke_signed, system_instruction};
@@ -28,7 +29,8 @@ use anchor_lang::solana_program::{program::invoke_signed, system_instruction};
 ///
 /// # Events
 ///
-/// Emits a log message indicating the amount refunded.
+/// Emits a log message indicating a refund has been issued, including the campaign ID, donor's public key, and refund amount.
+///
 pub fn refund_handler(ctx: Context<Refund>) -> Result<()> {
     let clock = Clock::get()?;
 
@@ -60,7 +62,11 @@ pub fn refund_handler(ctx: Context<Refund>) -> Result<()> {
         &[&[b"vault", campaign_key.as_ref(), &[vault_bump]]],
     )?;
 
-    msg!("Refunded: {} lamports", refund_amount);
+    emit!(RefundIssued {
+        campaign: campaign_key,
+        donor: ctx.accounts.donor.key(),
+        amount: refund_amount,
+    });
     Ok(())
 }
 

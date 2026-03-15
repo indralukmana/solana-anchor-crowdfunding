@@ -1,4 +1,5 @@
 use crate::error::CrowdfundError;
+use crate::event::ProfileUpdated;
 use crate::state::CreatorProfile;
 use anchor_lang::prelude::*;
 
@@ -21,14 +22,18 @@ use anchor_lang::prelude::*;
 ///
 /// # Events
 ///
-/// Emits a log message indicating the profile has been updated for the given creator.
+/// Emits a log message indicating the profile has been updated for the given creator, including the creator's public key and new metadata URI.
+///
 
 pub fn update_profile_handler(ctx: Context<UpdateProfile>, metadata_uri: String) -> Result<()> {
     require!(metadata_uri.len() <= 200, CrowdfundError::UriTooLong);
 
     ctx.accounts.profile.metadata_uri = metadata_uri;
 
-    msg!("Profile updated for {}", ctx.accounts.creator.key());
+    emit!(ProfileUpdated {
+        creator: ctx.accounts.creator.key(),
+        metadata_uri: ctx.accounts.profile.metadata_uri.clone(),
+    });
     Ok(())
 }
 

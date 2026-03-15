@@ -1,4 +1,5 @@
 use crate::error::CrowdfundError;
+use crate::event::FundsWithdrawn;
 use crate::state::Campaign;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{program::invoke_signed, system_instruction};
@@ -32,7 +33,8 @@ use anchor_lang::solana_program::{program::invoke_signed, system_instruction};
 ///
 /// # Events
 ///
-/// Emits a log message indicating the amount withdrawn on success.
+/// Emits a log message indicating the funds have been withdrawn, including the campaign ID, creator's public key, and withdrawn amount.
+///
 pub fn withdraw_handler(ctx: Context<Withdraw>) -> Result<()> {
     let clock = Clock::get()?;
 
@@ -64,7 +66,11 @@ pub fn withdraw_handler(ctx: Context<Withdraw>) -> Result<()> {
         &[&[b"vault", campaign_key.as_ref(), &[vault_bump]]],
     )?;
 
-    msg!("Withdrawn: {} lamports", raised);
+    emit!(FundsWithdrawn {
+        campaign: campaign_key,
+        creator: ctx.accounts.creator.key(),
+        amount: raised,
+    });
     Ok(())
 }
 
