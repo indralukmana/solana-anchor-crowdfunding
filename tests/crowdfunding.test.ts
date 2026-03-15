@@ -1,5 +1,5 @@
 import * as anchor from "@coral-xyz/anchor";
-import { AnchorProvider, BN, Program } from "@coral-xyz/anchor";
+import { AnchorProvider, BN, EventParser, Program } from "@coral-xyz/anchor";
 import { Crowdfunding } from "../target/types/crowdfunding";
 import { Keypair, PublicKey } from "@solana/web3.js";
 
@@ -22,7 +22,6 @@ const getProfilePda = (creator: PublicKey, programId: PublicKey) =>
     programId,
   );
 
-// campaignCount is the value of profile.campaign_count BEFORE create_campaign is called
 const getCampaignPda = (
   creator: PublicKey,
   campaignCount: BN,
@@ -53,10 +52,50 @@ const getContributionPda = (
     programId,
   );
 
+// Parses all Anchor events from a confirmed transaction's log messages.
+const parseEvents = async (
+  provider: AnchorProvider,
+  program: Program<Crowdfunding>,
+  txSig: string,
+): Promise<anchor.Event[]> => {
+  const tx = await provider.connection.getTransaction(txSig, {
+    commitment: "confirmed",
+    maxSupportedTransactionVersion: 0,
+  });
+  const logs = tx?.meta?.logMessages ?? [];
+  const parser = new EventParser(program.programId, program.coder);
+  const events: anchor.Event[] = [];
+  for (const event of parser.parseLogs(logs)) {
+    events.push(event);
+  }
+  return events;
+};
+
+// Finds an event by name — throws with a clear message if absent.
+// Throwing here narrows the return type to anchor.Event (never null),
+// eliminating the TS "possibly null" error on all .data accesses below.
+const findEvent = (events: anchor.Event[], name: string): anchor.Event => {
+  const event = events.find((e) => e?.name === name);
+  if (!event) {
+    throw new Error(
+      `Expected event "${name}" not found in transaction logs.\nEmitted events: [${
+        events.map((e) => e.name).join(", ") || "none"
+      }]`,
+    );
+  }
+  return event;
+};
+
 // ── Shared setup ──────────────────────────────────────────────────────────────
 
-const provider = AnchorProvider.env();
+const envProvider = AnchorProvider.env();
+const provider = new AnchorProvider(
+  envProvider.connection,
+  envProvider.wallet,
+  { commitment: "confirmed", preflightCommitment: "confirmed" },
+);
 anchor.setProvider(provider);
+
 const program = anchor.workspace.Crowdfunding as Program<Crowdfunding>;
 
 // ── Feature 0: profile ────────────────────────────────────────────────────────
@@ -68,7 +107,7 @@ describe("Feature 0: profile", () => {
 
     const [profilePda] = getProfilePda(creator.publicKey, program.programId);
 
-    await program.methods
+    const txSig = await program.methods
       .createProfile("ipfs://QmExampleHash")
       .accountsPartial({ creator: creator.publicKey, profile: profilePda })
       .signers([creator])
@@ -78,6 +117,11 @@ describe("Feature 0: profile", () => {
     expect(profile.creator.toBase58()).toBe(creator.publicKey.toBase58());
     expect(profile.metadataUri).toBe("ipfs://QmExampleHash");
     expect(profile.campaignCount.toNumber()).toBe(0);
+
+    const events = await parseEvents(provider, program, txSig);
+    const event = findEvent(events, "profileCreated");
+    expect(event.data.creator.toBase58()).toBe(creator.publicKey.toBase58());
+    expect(event.data.metadataUri).toBe("ipfs://QmExampleHash");
   });
 
   it("✅ updates profile metadata URI", async () => {
@@ -92,7 +136,7 @@ describe("Feature 0: profile", () => {
       .signers([creator])
       .rpc();
 
-    await program.methods
+    const txSig = await program.methods
       .updateProfile("ipfs://QmNewHash")
       .accountsPartial({ creator: creator.publicKey, profile: profilePda })
       .signers([creator])
@@ -100,6 +144,11 @@ describe("Feature 0: profile", () => {
 
     const profile = await program.account.creatorProfile.fetch(profilePda);
     expect(profile.metadataUri).toBe("ipfs://QmNewHash");
+
+    const events = await parseEvents(provider, program, txSig);
+    const event = findEvent(events, "profileUpdated");
+    expect(event.data.creator.toBase58()).toBe(creator.publicKey.toBase58());
+    expect(event.data.metadataUri).toBe("ipfs://QmNewHash");
   });
 
   it("✅ campaign_count increments after each campaign", async () => {
@@ -114,7 +163,6 @@ describe("Feature 0: profile", () => {
       .signers([creator])
       .rpc();
 
-    // First campaign — uses count=0
     const [campaignPda1] = getCampaignPda(
       creator.publicKey,
       new BN(0),
@@ -138,7 +186,6 @@ describe("Feature 0: profile", () => {
     );
     expect(profileAfterFirst.campaignCount.toNumber()).toBe(1);
 
-    // Second campaign — uses count=1
     const [campaignPda2] = getCampaignPda(
       creator.publicKey,
       new BN(1),
@@ -162,7 +209,6 @@ describe("Feature 0: profile", () => {
     );
     expect(profileAfterSecond.campaignCount.toNumber()).toBe(2);
 
-    // Both campaigns are independent and fetchable
     const c1 = await program.account.campaign.fetch(campaignPda1);
     const c2 = await program.account.campaign.fetch(campaignPda2);
     expect(c1.campaignId.toNumber()).toBe(0);
@@ -259,7 +305,7 @@ describe("Feature 1: create_campaign", () => {
     const goal = new BN(1_000_000_000);
     const deadline = new BN(Math.floor(Date.now() / 1000) + 86400);
 
-    await program.methods
+    const txSig = await program.methods
       .createCampaign(goal, deadline)
       .accountsPartial({
         creator: creator.publicKey,
@@ -275,6 +321,14 @@ describe("Feature 1: create_campaign", () => {
     expect(campaign.goal.toNumber()).toBe(goal.toNumber());
     expect(campaign.raised.toNumber()).toBe(0);
     expect(campaign.claimed).toBe(false);
+
+    const events = await parseEvents(provider, program, txSig);
+    const event = findEvent(events, "campaignCreated");
+    expect(event.data.creator.toBase58()).toBe(creator.publicKey.toBase58());
+    expect(event.data.campaign.toBase58()).toBe(campaignPda.toBase58());
+    expect(event.data.campaignId.toNumber()).toBe(0);
+    expect(event.data.goal.toNumber()).toBe(goal.toNumber());
+    expect(event.data.deadline.toNumber()).toBe(deadline.toNumber());
   });
 
   it("❌ rejects a campaign with a past deadline", async () => {
@@ -310,8 +364,6 @@ describe("Feature 1: create_campaign", () => {
     ).rejects.toThrow(/InvalidDeadline/);
   });
 });
-
-// ── Feature 2: contribute ─────────────────────────────────────────────────────
 
 // ── Feature 2: contribute ─────────────────────────────────────────────────────
 
@@ -363,7 +415,7 @@ describe("Feature 2: contribute", () => {
       program.programId,
     );
 
-    await program.methods
+    const txSig = await program.methods
       .contribute(new BN(400_000_000))
       .accountsPartial({
         campaign: campaignPda,
@@ -383,6 +435,13 @@ describe("Feature 2: contribute", () => {
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
     expect(vaultBalance).toBe(400_000_000);
+
+    const events = await parseEvents(provider, program, txSig);
+    const event = findEvent(events, "contributionMade");
+    expect(event.data.campaign.toBase58()).toBe(campaignPda.toBase58());
+    expect(event.data.donor.toBase58()).toBe(donor.publicKey.toBase58());
+    expect(event.data.amount.toNumber()).toBe(400_000_000);
+    expect(event.data.totalRaised.toNumber()).toBe(400_000_000);
   });
 
   it("✅ same donor contributes twice, amount accumulates", async () => {
@@ -405,7 +464,7 @@ describe("Feature 2: contribute", () => {
       .signers([donor])
       .rpc();
 
-    await program.methods
+    const txSig = await program.methods
       .contribute(new BN(300_000_000))
       .accountsPartial({
         campaign: campaignPda,
@@ -422,6 +481,11 @@ describe("Feature 2: contribute", () => {
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
     expect(vaultBalance).toBe(600_000_000);
+
+    const events = await parseEvents(provider, program, txSig);
+    const event = findEvent(events, "contributionMade");
+    expect(event.data.amount.toNumber()).toBe(300_000_000);
+    expect(event.data.totalRaised.toNumber()).toBe(600_000_000);
   });
 
   it("✅ overfunding allowed — contribution exceeds goal", async () => {
@@ -434,8 +498,7 @@ describe("Feature 2: contribute", () => {
       program.programId,
     );
 
-    // Contribute 1.5 SOL against a 1 SOL goal
-    await program.methods
+    const txSig = await program.methods
       .contribute(new BN(1_500_000_000))
       .accountsPartial({
         campaign: campaignPda,
@@ -445,7 +508,6 @@ describe("Feature 2: contribute", () => {
       .signers([donor])
       .rpc();
 
-    // Full amount accepted — no capping
     const campaign = await program.account.campaign.fetch(campaignPda);
     expect(campaign.raised.toNumber()).toBe(1_500_000_000);
 
@@ -456,6 +518,11 @@ describe("Feature 2: contribute", () => {
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
     expect(vaultBalance).toBe(1_500_000_000);
+
+    const events = await parseEvents(provider, program, txSig);
+    const event = findEvent(events, "contributionMade");
+    expect(event.data.amount.toNumber()).toBe(1_500_000_000);
+    expect(event.data.totalRaised.toNumber()).toBe(1_500_000_000);
   });
 
   it("✅ multiple donors overfund, creator gets full raised amount on withdraw", async () => {
@@ -464,7 +531,6 @@ describe("Feature 2: contribute", () => {
     await airdrop(provider, donor1.publicKey);
     await airdrop(provider, donor2.publicKey);
 
-    // Both donate past the 1 SOL goal
     await program.methods
       .contribute(new BN(800_000_000))
       .accountsPartial({
@@ -510,7 +576,6 @@ describe("Feature 2: contribute", () => {
   });
 
   it("❌ rejects contribution after deadline", async () => {
-    // Create a short-deadline campaign specifically for this test
     const shortCreator = Keypair.generate();
     await airdrop(provider, shortCreator.publicKey);
 
@@ -629,7 +694,7 @@ describe("Feature 3: withdraw", () => {
       creator.publicKey,
     );
 
-    await program.methods
+    const txSig = await program.methods
       .withdraw()
       .accountsPartial({
         creator: creator.publicKey,
@@ -649,6 +714,12 @@ describe("Feature 3: withdraw", () => {
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
     expect(vaultBalance).toBe(0);
+
+    const events = await parseEvents(provider, program, txSig);
+    const event = findEvent(events, "fundsWithdrawn");
+    expect(event.data.campaign.toBase58()).toBe(campaignPda.toBase58());
+    expect(event.data.creator.toBase58()).toBe(creator.publicKey.toBase58());
+    expect(event.data.amount.toNumber()).toBe(500_000_000);
   }, 15_000);
 
   it("❌ rejects withdraw before deadline", async () => {
@@ -840,7 +911,7 @@ describe("Feature 4: refund", () => {
       donor.publicKey,
     );
 
-    await program.methods
+    const txSig = await program.methods
       .refund()
       .accountsPartial({
         campaign: campaignPda,
@@ -862,6 +933,12 @@ describe("Feature 4: refund", () => {
       .fetch(contributionPda)
       .catch(() => null);
     expect(contribution).toBeNull();
+
+    const events = await parseEvents(provider, program, txSig);
+    const event = findEvent(events, "refundIssued");
+    expect(event.data.campaign.toBase58()).toBe(campaignPda.toBase58());
+    expect(event.data.donor.toBase58()).toBe(donor.publicKey.toBase58());
+    expect(event.data.amount.toNumber()).toBe(400_000_000);
   }, 15_000);
 
   it("❌ rejects refund before deadline", async () => {
@@ -913,9 +990,8 @@ describe("Feature 4: refund", () => {
       .signers([creator])
       .rpc();
 
-    // Goal is 500_000_000 — donate exactly that (or more) to trigger GoalAlreadyReached on refund
     await program.methods
-      .contribute(new BN(600_000_000)) // could be 500_000_000 or more, since contribution is not capped
+      .contribute(new BN(600_000_000))
       .accountsPartial({
         campaign: campaignPda,
         vault: vaultPda,
