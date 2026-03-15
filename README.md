@@ -1,6 +1,8 @@
 # Solana Crowdfunding
 
-A crowdfunding smart contract on Solana built with Anchor. Creators launch campaigns with a funding goal and deadline. Donations are locked in a PDA vault — not sent directly to the creator. After the deadline, the creator withdraws if the goal was met, or donors claim refunds if it wasn't.
+A crowdfunding smart contract on Solana built with the Anchor framework. Creators register a profile, launch campaigns with a funding goal and deadline, and receive funds only if the goal is met. Contributions are locked in a system-owned PDA vault — never held directly by the program. If the goal is not met, donors can reclaim their contributions after the deadline.
+
+Overfunding is intentionally allowed — contributors can donate beyond the goal, and the creator receives the full raised amount.
 
 ## How It Works
 
@@ -11,21 +13,24 @@ sequenceDiagram
     participant Program
     participant Vault (PDA)
 
+    Creator->>Program: create_profile(metadata_uri)
+    Program-->>Creator: CreatorProfile PDA initialized
+
     Creator->>Program: create_campaign(goal, deadline)
-    Program-->>Creator: Campaign PDA initialized
+    Program-->>Creator: Campaign PDA initialized, campaign_count++
 
     Donor->>Program: contribute(amount)
     Program->>Vault (PDA): Lock SOL
-    Program-->>Donor: Contribution recorded
+    Program-->>Donor: Contribution PDA created/updated
 
-    alt Goal met after deadline
+    alt Goal met (raised >= goal) after deadline
         Creator->>Program: withdraw()
         Program->>Vault (PDA): Drain all SOL
-        Vault (PDA)-->>Creator: SOL transferred
-    else Goal not met after deadline
+        Vault (PDA)-->>Creator: Full raised amount transferred
+    else Goal not met (raised < goal) after deadline
         Donor->>Program: refund()
         Program->>Vault (PDA): Drain donor's contribution
-        Vault (PDA)-->>Donor: SOL returned
+        Vault (PDA)-->>Donor: SOL returned, Contribution PDA closed
     end
 ```
 
@@ -35,11 +40,10 @@ sequenceDiagram
 stateDiagram-v2
     [*] --> Active: create_campaign()
 
-    Active --> Active: contribute() [before deadline, goal not met]
-    Active --> GoalMet: contribute() [goal reached]
-    Active --> Failed: deadline passes [goal not met]
-    GoalMet --> Failed: deadline passes [should not happen - goal met]
-    GoalMet --> Claimed: withdraw() [creator claims]
+    Active --> Active: contribute() [before deadline]
+    Active --> Failed: deadline passes, raised < goal
+    Active --> Succeeded: deadline passes, raised >= goal
+    Succeeded --> Claimed: withdraw() [creator claims]
     Failed --> Refunded: refund() [each donor claims back]
     Claimed --> [*]
     Refunded --> [*]
@@ -49,8 +53,15 @@ stateDiagram-v2
 
 ```mermaid
 erDiagram
+    CreatorProfile {
+        Pubkey creator
+        u64 campaign_count
+        String metadata_uri
+        u8 bump
+    }
     Campaign {
         Pubkey creator
+        u64 campaign_id
         u64 goal
         u64 raised
         i64 deadline
@@ -65,73 +76,90 @@ erDiagram
     Vault {
         lamports balance
     }
+    CreatorProfile ||--o{ Campaign : "owns many"
     Campaign ||--o{ Contribution : "has many"
-    Campaign ||--|| Vault : "owns"
+    Campaign ||--|| Vault : "backed by"
 ```
 
 ## Instructions
 
-| Instruction       | Caller       | Conditions                            | Effect                                                    |
-| ----------------- | ------------ | ------------------------------------- | --------------------------------------------------------- |
-| `create_campaign` | Creator      | Deadline in the future                | Initializes Campaign PDA                                  |
-| `contribute`      | Anyone       | Before deadline, goal not yet met     | Locks SOL in vault, updates raised                        |
-| `withdraw`        | Creator only | After deadline, goal met, not claimed | Drains vault to creator                                   |
-| `refund`          | Donor        | After deadline, goal not met          | Returns donor's contribution, closes Contribution account |
+| Instruction       | Caller  | Conditions                             | Effect                                                      |
+| ----------------- | ------- | -------------------------------------- | ----------------------------------------------------------- |
+| `create_profile`  | Anyone  | Profile does not exist yet             | Initializes `CreatorProfile` PDA with metadata URI          |
+| `update_profile`  | Creator | Profile exists, caller is creator      | Updates `metadata_uri` on existing profile                  |
+| `create_campaign` | Creator | Profile exists, deadline in the future | Initializes `Campaign` PDA, increments `campaign_count`     |
+| `contribute`      | Anyone  | Before deadline                        | Locks SOL in vault, updates `raised` and `Contribution` PDA |
+| `withdraw`        | Creator | After deadline, `raised >= goal`       | Drains vault to creator, marks campaign `claimed`           |
+| `refund`          | Donor   | After deadline, `raised < goal`        | Returns donor's SOL, closes `Contribution` PDA              |
 
 ## Contribution Rules
 
-- Contributions are **capped** at the remaining goal — overshoot is trimmed, not rejected
-- A donor can contribute **multiple times**; amounts accumulate in their Contribution PDA
-- Once the goal is met or the deadline passes, contributions are blocked
+- Overfunding is **allowed** — a donor can contribute any amount regardless of the current `raised` vs `goal`
+- A donor can contribute **multiple times**; amounts accumulate in their `Contribution` PDA
+- The only restriction is the deadline — no contributions accepted after it passes
+- Minimum contribution is **1 lamport** (zero-amount contributions are rejected)
 
 ## PDA Seeds
 
-| Account        | Seeds                                             |
-| -------------- | ------------------------------------------------- |
-| `Campaign`     | `["campaign", creator_pubkey]`                    |
-| `Vault`        | `["vault", campaign_pubkey]`                      |
-| `Contribution` | `["contribution", campaign_pubkey, donor_pubkey]` |
+| Account          | Seeds                                                      |
+| ---------------- | ---------------------------------------------------------- |
+| `CreatorProfile` | `["profile", creator_pubkey]`                              |
+| `Campaign`       | `["campaign", creator_pubkey, campaign_id (u64 le bytes)]` |
+| `Vault`          | `["vault", campaign_pubkey]`                               |
+| `Contribution`   | `["contribution", campaign_pubkey, donor_pubkey]`          |
+
+> `campaign_id` equals the creator's `campaign_count` value at the time of campaign creation, encoded as 8-byte little-endian. Clients should read `profile.campaign_count` before calling `create_campaign` to derive the next campaign PDA.
 
 ## Error Reference
 
-| Error                | Cause                                     |
-| -------------------- | ----------------------------------------- |
-| `InvalidDeadline`    | Deadline is not in the future             |
-| `DeadlineNotReached` | Withdraw/refund attempted before deadline |
-| `DeadlinePassed`     | Contribution attempted after deadline     |
-| `GoalNotReached`     | Withdraw attempted but goal not met       |
-| `GoalAlreadyReached` | Contribution attempted but goal fully met |
-| `AlreadyClaimed`     | Withdraw attempted after already claimed  |
-| `Unauthorized`       | Non-creator attempted to withdraw         |
-| `NothingToRefund`    | Donor has no contribution to refund       |
+| Error                   | Cause                                     |
+| ----------------------- | ----------------------------------------- |
+| `InvalidDeadline`       | Deadline is not in the future             |
+| `DeadlineNotReached`    | Withdraw/refund attempted before deadline |
+| `DeadlinePassed`        | Contribution attempted after deadline     |
+| `GoalNotReached`        | Withdraw attempted but `raised < goal`    |
+| `GoalAlreadyReached`    | Refund attempted but `raised >= goal`     |
+| `AlreadyClaimed`        | Withdraw attempted after already claimed  |
+| `Unauthorized`          | Non-creator attempted to withdraw         |
+| `NothingToRefund`       | Donor has zero contribution amount        |
+| `UriTooLong`            | `metadata_uri` exceeds 200 characters     |
+| `ZeroAmount`            | Contribution amount is zero               |
+| `CampaignCountOverflow` | Creator has created `u64::MAX` campaigns  |
 
 ## Project Structure
 
 ```txt
 programs/crowdfunding/src/
-├── lib.rs                    # Program entry point and instruction dispatchers
-├── errors.rs                 # Custom error codes
+├── lib.rs                      # Program entry point and instruction dispatchers
+├── error.rs                    # Custom error codes
 ├── state/
-│   ├── campaign.rs           # Campaign account struct
-│   └── contribution.rs       # Contribution account struct
+│   ├── mod.rs
+│   ├── creator_profile.rs      # CreatorProfile account struct
+│   ├── campaign.rs             # Campaign account struct
+│   └── contribution.rs         # Contribution account struct
 └── instructions/
-    ├── create_campaign.rs    # Initialize a new campaign
-    ├── contribute.rs         # Donate SOL to a campaign
-    ├── withdraw.rs           # Creator claims funds after success
-    └── refund.rs             # Donor reclaims contribution after failure
+    ├── mod.rs
+    ├── create_profile.rs       # Register a creator profile
+    ├── update_profile.rs       # Update creator metadata URI
+    ├── create_campaign.rs      # Launch a new campaign
+    ├── contribute.rs           # Donate SOL to a campaign
+    ├── withdraw.rs             # Creator claims funds after success
+    └── refund.rs               # Donor reclaims contribution after failure
+tests/
+└── crowdfunding.test.ts        # Full integration test suite (24 tests)
 ```
 
 ## Prerequisites
 
-- [Rust](https://rustup.rs/)
-- [Solana CLI](https://docs.solana.com/cli/install-solana-cli-tools)
-- [Anchor CLI](https://www.anchor-lang.com/docs/installation)
-- [Node.js](https://nodejs.org/) + [pnpm](https://pnpm.io/)
+- [Rust](https://rustup.rs/) — `rustup install stable`
+- [Solana CLI](https://docs.solana.com/cli/install-solana-cli-tools) — v1.18+
+- [Anchor CLI](https://www.anchor-lang.com/docs/installation) — v0.32+
+- [Node.js](https://nodejs.org/) v18+ + [pnpm](https://pnpm.io/)
 
 ## Setup
 
 ```bash
-# Install dependencies
+# Install JS dependencies
 pnpm install
 
 # Build the program
@@ -141,15 +169,23 @@ anchor build
 anchor keys list
 ```
 
-Update `declare_id!("...")` in `programs/crowdfunding/src/lib.rs` and `[programs.localnet]` in `Anchor.toml` with the output from `anchor keys list`.
+Update `declare_id!("...")` in `programs/crowdfunding/src/lib.rs` and `[programs.localnet]` in `Anchor.toml` with the output from `anchor keys list`, then rebuild:
+
+```bash
+anchor build
+```
 
 ## Running Tests
 
 ```bash
+# All-in-one (starts validator, runs tests, stops validator)
+anchor test
+
+# Or manually:
 # Terminal 1 — start local validator
 solana-test-validator --reset
 
-# Terminal 2 — run tests
+# Terminal 2 — run tests against running validator
 anchor test --skip-local-validator
 ```
 
@@ -159,17 +195,20 @@ anchor test --skip-local-validator
 # Switch to devnet
 solana config set --url devnet
 
-# Fund your wallet
+# Fund your wallet (if needed)
 solana airdrop 2
 
 # Deploy
 anchor deploy --provider.cluster devnet
+
+# Verify deployment
+solana program show <PROGRAM_ID> --url devnet
 ```
 
 ## Deployment Info
 
-|                |                                                                                          |
-| -------------- | ---------------------------------------------------------------------------------------- |
-| **Network**    | Solana Devnet                                                                            |
-| **Program ID** | `3qUXqi2J3W9juVRqZNrwjpH9WPfzx8wHaPAboXVJVPpp`                                           |
-| **Solscan**    | <https://solscan.io/account/3qUXqi2J3W9juVRqZNrwjpH9WPfzx8wHaPAboXVJVPpp?cluster=devnet> |
+|                |                                                                                                           |
+| -------------- | --------------------------------------------------------------------------------------------------------- |
+| **Network**    | Solana Devnet                                                                                             |
+| **Program ID** | `3qUXqi2J3W9juVRqZNrwjpH9WPfzx8wHaPAboXVJVPpp`                                                            |
+| **Solscan**    | [View on Solscan](https://solscan.io/account/3qUXqi2J3W9juVRqZNrwjpH9WPfzx8wHaPAboXVJVPpp?cluster=devnet) |
