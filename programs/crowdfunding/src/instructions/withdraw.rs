@@ -36,17 +36,12 @@ use anchor_lang::solana_program::{program::invoke_signed, system_instruction};
 pub fn withdraw_handler(ctx: Context<Withdraw>) -> Result<()> {
     let clock = Clock::get()?;
 
-    let creator_key = ctx.accounts.campaign.creator;
     let campaign_key = ctx.accounts.campaign.key();
     let deadline = ctx.accounts.campaign.deadline;
     let raised = ctx.accounts.campaign.raised;
     let goal = ctx.accounts.campaign.goal;
     let vault_bump = ctx.bumps.vault;
 
-    require!(
-        ctx.accounts.creator.key() == creator_key,
-        CrowdfundError::Unauthorized
-    );
     require!(
         clock.unix_timestamp >= deadline,
         CrowdfundError::DeadlineNotReached
@@ -79,6 +74,7 @@ pub struct Withdraw<'info> {
         mut,
         seeds = [b"campaign", campaign.creator.as_ref(), &campaign.campaign_id.to_le_bytes()],
         bump = campaign.bump,
+        has_one = creator @ CrowdfundError::Unauthorized,
     )]
     pub campaign: Account<'info, Campaign>,
 
