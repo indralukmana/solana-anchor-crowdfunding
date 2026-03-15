@@ -48,8 +48,7 @@ pub fn contribute_handler(ctx: Context<Contribute>, amount: u64) -> Result<()> {
 
     ctx.accounts.campaign.raised = ctx.accounts.campaign.raised.saturating_add(amount);
 
-    ctx.accounts.contribution.donor = donor_key;
-    ctx.accounts.contribution.campaign = campaign_key;
+    // Contribution account is guaranteed to be initialized with these fields already set.
     ctx.accounts.contribution.amount = ctx.accounts.contribution.amount.saturating_add(amount);
 
     emit!(ContributionMade {
@@ -71,9 +70,7 @@ pub struct Contribute<'info> {
     pub campaign: Account<'info, Campaign>,
 
     #[account(
-        init_if_needed,
-        payer = donor,
-        space = 8 + Contribution::INIT_SPACE,
+        mut,
         seeds = [b"contribution", campaign.key().as_ref(), donor.key().as_ref()],
         bump,
     )]

@@ -22,6 +22,12 @@ pub struct CampaignCreated {
 }
 
 #[event]
+pub struct ContributionInitialized {
+    pub campaign: Pubkey,
+    pub donor: Pubkey,
+}
+
+#[event]
 pub struct ContributionMade {
     pub campaign: Pubkey,
     pub donor: Pubkey,
