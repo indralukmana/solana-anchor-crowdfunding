@@ -27,6 +27,10 @@ pub mod crowdfunding {
         create_campaign_handler(ctx, goal, deadline)
     }
 
+    pub fn initialize_contribution(ctx: Context<InitializeContribution>) -> Result<()> {
+        initialize_contribution_handler(ctx)
+    }
+
     pub fn contribute(ctx: Context<Contribute>, amount: u64) -> Result<()> {
         contribute_handler(ctx, amount)
     }
