@@ -35,6 +35,8 @@ pub fn create_campaign_handler(
         CrowdfundError::InvalidDeadline
     );
 
+    require!(goal > 0, CrowdfundError::ZeroAmount);
+
     let campaign_id = ctx.accounts.profile.campaign_count;
 
     // Increment counter for next campaign
