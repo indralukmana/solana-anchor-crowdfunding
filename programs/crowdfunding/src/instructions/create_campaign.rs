@@ -67,7 +67,7 @@ pub struct CreateCampaign<'info> {
         mut,
         seeds = [b"profile", creator.key().as_ref()],
         bump = profile.bump,
-        has_one = creator,
+        has_one = creator @ CrowdfundError::Unauthorized,
     )]
     pub profile: Account<'info, CreatorProfile>,
 
