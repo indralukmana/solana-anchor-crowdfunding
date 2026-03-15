@@ -2,25 +2,6 @@ use crate::error::CrowdfundError;
 use crate::state::CreatorProfile;
 use anchor_lang::prelude::*;
 
-/// Handles the creation of a new creator profile.
-///
-/// This function initializes a new `CreatorProfile` account with the provided metadata URI,
-/// sets the creator's public key, initializes the campaign count to zero, and stores the bump seed.
-/// It enforces a maximum length of 200 characters for the metadata URI.
-///
-/// # Arguments
-///
-/// * `ctx` - The context containing all accounts required for profile creation.
-/// * `metadata_uri` - A string containing the URI to the creator's metadata.
-///
-/// # Errors
-///
-/// Returns a `CrowdfundError::UriTooLong` error if the `metadata_uri` exceeds 200 characters.
-///
-/// # Events
-///
-/// Emits a log message indicating successful profile creation./// Handles the creation of a new creator profile.
-///
 /// This function initializes a new `CreatorProfile` account with the provided metadata URI,
 /// sets the creator's public key, initializes the campaign count to zero, and stores the bump seed.
 /// It enforces a maximum length of 200 characters for the metadata URI.
