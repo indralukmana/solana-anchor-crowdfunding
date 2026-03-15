@@ -25,6 +25,8 @@ use anchor_lang::system_program;
 pub fn contribute_handler(ctx: Context<Contribute>, amount: u64) -> Result<()> {
     let clock = Clock::get()?;
 
+    require!(amount > 0, CrowdfundError::ZeroAmount);
+
     let deadline = ctx.accounts.campaign.deadline;
     let goal = ctx.accounts.campaign.goal;
     let raised = ctx.accounts.campaign.raised;
@@ -72,7 +74,7 @@ pub fn contribute_handler(ctx: Context<Contribute>, amount: u64) -> Result<()> {
 pub struct Contribute<'info> {
     #[account(
         mut,
-        seeds = [b"campaign", campaign.creator.as_ref()],
+        seeds = [b"campaign", campaign.creator.as_ref(), &campaign.campaign_id.to_le_bytes()],
         bump = campaign.bump,
     )]
     pub campaign: Account<'info, Campaign>,

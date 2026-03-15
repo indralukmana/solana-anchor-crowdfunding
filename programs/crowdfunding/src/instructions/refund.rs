@@ -68,7 +68,7 @@ pub fn refund_handler(ctx: Context<Refund>) -> Result<()> {
 pub struct Refund<'info> {
     #[account(
         mut,
-        seeds = [b"campaign", campaign.creator.as_ref()],
+        seeds = [b"campaign", campaign.creator.as_ref(), &campaign.campaign_id.to_le_bytes()],
         bump = campaign.bump,
     )]
     pub campaign: Account<'info, Campaign>,
