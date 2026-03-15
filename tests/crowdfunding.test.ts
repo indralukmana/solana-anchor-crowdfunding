@@ -16,9 +16,24 @@ const airdrop = async (provider: AnchorProvider, pubkey: PublicKey) => {
   );
 };
 
-const getCampaignPda = (creator: PublicKey, programId: PublicKey) =>
+const getProfilePda = (creator: PublicKey, programId: PublicKey) =>
   PublicKey.findProgramAddressSync(
-    [Buffer.from("campaign"), creator.toBuffer()],
+    [Buffer.from("profile"), creator.toBuffer()],
+    programId,
+  );
+
+// campaignCount is the value of profile.campaign_count BEFORE create_campaign is called
+const getCampaignPda = (
+  creator: PublicKey,
+  campaignCount: BN,
+  programId: PublicKey,
+) =>
+  PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("campaign"),
+      creator.toBuffer(),
+      campaignCount.toArrayLike(Buffer, "le", 8),
+    ],
     programId,
   );
 
@@ -44,6 +59,183 @@ const provider = AnchorProvider.env();
 anchor.setProvider(provider);
 const program = anchor.workspace.Crowdfunding as Program<Crowdfunding>;
 
+// ── Feature 0: profile ────────────────────────────────────────────────────────
+
+describe("Feature 0: profile", () => {
+  it("✅ creates a profile with metadata URI", async () => {
+    const creator = Keypair.generate();
+    await airdrop(provider, creator.publicKey);
+
+    const [profilePda] = getProfilePda(creator.publicKey, program.programId);
+
+    await program.methods
+      .createProfile("ipfs://QmExampleHash")
+      .accountsPartial({ creator: creator.publicKey, profile: profilePda })
+      .signers([creator])
+      .rpc();
+
+    const profile = await program.account.creatorProfile.fetch(profilePda);
+    expect(profile.creator.toBase58()).toBe(creator.publicKey.toBase58());
+    expect(profile.metadataUri).toBe("ipfs://QmExampleHash");
+    expect(profile.campaignCount.toNumber()).toBe(0);
+  });
+
+  it("✅ updates profile metadata URI", async () => {
+    const creator = Keypair.generate();
+    await airdrop(provider, creator.publicKey);
+
+    const [profilePda] = getProfilePda(creator.publicKey, program.programId);
+
+    await program.methods
+      .createProfile("ipfs://QmOldHash")
+      .accountsPartial({ creator: creator.publicKey, profile: profilePda })
+      .signers([creator])
+      .rpc();
+
+    await program.methods
+      .updateProfile("ipfs://QmNewHash")
+      .accountsPartial({ creator: creator.publicKey, profile: profilePda })
+      .signers([creator])
+      .rpc();
+
+    const profile = await program.account.creatorProfile.fetch(profilePda);
+    expect(profile.metadataUri).toBe("ipfs://QmNewHash");
+  });
+
+  it("✅ campaign_count increments after each campaign", async () => {
+    const creator = Keypair.generate();
+    await airdrop(provider, creator.publicKey);
+
+    const [profilePda] = getProfilePda(creator.publicKey, program.programId);
+
+    await program.methods
+      .createProfile("ipfs://QmExampleHash")
+      .accountsPartial({ creator: creator.publicKey, profile: profilePda })
+      .signers([creator])
+      .rpc();
+
+    // First campaign — uses count=0
+    const [campaignPda1] = getCampaignPda(
+      creator.publicKey,
+      new BN(0),
+      program.programId,
+    );
+    await program.methods
+      .createCampaign(
+        new BN(1_000_000_000),
+        new BN(Math.floor(Date.now() / 1000) + 86400),
+      )
+      .accountsPartial({
+        creator: creator.publicKey,
+        profile: profilePda,
+        campaign: campaignPda1,
+      })
+      .signers([creator])
+      .rpc();
+
+    const profileAfterFirst = await program.account.creatorProfile.fetch(
+      profilePda,
+    );
+    expect(profileAfterFirst.campaignCount.toNumber()).toBe(1);
+
+    // Second campaign — uses count=1
+    const [campaignPda2] = getCampaignPda(
+      creator.publicKey,
+      new BN(1),
+      program.programId,
+    );
+    await program.methods
+      .createCampaign(
+        new BN(500_000_000),
+        new BN(Math.floor(Date.now() / 1000) + 86400),
+      )
+      .accountsPartial({
+        creator: creator.publicKey,
+        profile: profilePda,
+        campaign: campaignPda2,
+      })
+      .signers([creator])
+      .rpc();
+
+    const profileAfterSecond = await program.account.creatorProfile.fetch(
+      profilePda,
+    );
+    expect(profileAfterSecond.campaignCount.toNumber()).toBe(2);
+
+    // Both campaigns are independent and fetchable
+    const c1 = await program.account.campaign.fetch(campaignPda1);
+    const c2 = await program.account.campaign.fetch(campaignPda2);
+    expect(c1.campaignId.toNumber()).toBe(0);
+    expect(c2.campaignId.toNumber()).toBe(1);
+  });
+
+  it("❌ rejects profile creation with URI over 200 chars", async () => {
+    const creator = Keypair.generate();
+    await airdrop(provider, creator.publicKey);
+
+    const [profilePda] = getProfilePda(creator.publicKey, program.programId);
+    const longUri = "ipfs://" + "a".repeat(200);
+
+    await expect(
+      program.methods
+        .createProfile(longUri)
+        .accountsPartial({ creator: creator.publicKey, profile: profilePda })
+        .signers([creator])
+        .rpc(),
+    ).rejects.toThrow(/UriTooLong/);
+  });
+
+  it("❌ rejects update from non-creator", async () => {
+    const creator = Keypair.generate();
+    const nonCreator = Keypair.generate();
+    await airdrop(provider, creator.publicKey);
+    await airdrop(provider, nonCreator.publicKey);
+
+    const [profilePda] = getProfilePda(creator.publicKey, program.programId);
+
+    await program.methods
+      .createProfile("ipfs://QmExampleHash")
+      .accountsPartial({ creator: creator.publicKey, profile: profilePda })
+      .signers([creator])
+      .rpc();
+
+    await expect(
+      program.methods
+        .updateProfile("ipfs://QmHackedHash")
+        .accountsPartial({ creator: nonCreator.publicKey, profile: profilePda })
+        .signers([nonCreator])
+        .rpc(),
+    ).rejects.toThrow(/ConstraintHasOne|HasOneViolated|ConstraintSeeds/);
+  });
+
+  it("❌ rejects campaign creation without a profile", async () => {
+    const creator = Keypair.generate();
+    await airdrop(provider, creator.publicKey);
+
+    const [profilePda] = getProfilePda(creator.publicKey, program.programId);
+    const [campaignPda] = getCampaignPda(
+      creator.publicKey,
+      new BN(0),
+      program.programId,
+    );
+
+    await expect(
+      program.methods
+        .createCampaign(
+          new BN(1_000_000_000),
+          new BN(Math.floor(Date.now() / 1000) + 86400),
+        )
+        .accountsPartial({
+          creator: creator.publicKey,
+          profile: profilePda,
+          campaign: campaignPda,
+        })
+        .signers([creator])
+        .rpc(),
+    ).rejects.toThrow(/AccountNotInitialized|AccountDiscriminatorNotFound/);
+  });
+});
+
 // ── Feature 1: create_campaign ────────────────────────────────────────────────
 
 describe("Feature 1: create_campaign", () => {
@@ -51,7 +243,18 @@ describe("Feature 1: create_campaign", () => {
     const creator = Keypair.generate();
     await airdrop(provider, creator.publicKey);
 
-    const [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
+    const [profilePda] = getProfilePda(creator.publicKey, program.programId);
+    const [campaignPda] = getCampaignPda(
+      creator.publicKey,
+      new BN(0),
+      program.programId,
+    );
+
+    await program.methods
+      .createProfile("ipfs://QmExampleHash")
+      .accountsPartial({ creator: creator.publicKey, profile: profilePda })
+      .signers([creator])
+      .rpc();
 
     const goal = new BN(1_000_000_000);
     const deadline = new BN(Math.floor(Date.now() / 1000) + 86400);
@@ -60,6 +263,7 @@ describe("Feature 1: create_campaign", () => {
       .createCampaign(goal, deadline)
       .accountsPartial({
         creator: creator.publicKey,
+        profile: profilePda,
         campaign: campaignPda,
       })
       .signers([creator])
@@ -67,6 +271,7 @@ describe("Feature 1: create_campaign", () => {
 
     const campaign = await program.account.campaign.fetch(campaignPda);
     expect(campaign.creator.toBase58()).toBe(creator.publicKey.toBase58());
+    expect(campaign.campaignId.toNumber()).toBe(0);
     expect(campaign.goal.toNumber()).toBe(goal.toNumber());
     expect(campaign.raised.toNumber()).toBe(0);
     expect(campaign.claimed).toBe(false);
@@ -76,16 +281,28 @@ describe("Feature 1: create_campaign", () => {
     const creator = Keypair.generate();
     await airdrop(provider, creator.publicKey);
 
-    const [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
+    const [profilePda] = getProfilePda(creator.publicKey, program.programId);
+    const [campaignPda] = getCampaignPda(
+      creator.publicKey,
+      new BN(0),
+      program.programId,
+    );
 
-    const goal = new BN(1_000_000_000);
-    const pastDeadline = new BN(Math.floor(Date.now() / 1000) - 86400);
+    await program.methods
+      .createProfile("ipfs://QmExampleHash")
+      .accountsPartial({ creator: creator.publicKey, profile: profilePda })
+      .signers([creator])
+      .rpc();
 
     await expect(
       program.methods
-        .createCampaign(goal, pastDeadline)
+        .createCampaign(
+          new BN(1_000_000_000),
+          new BN(Math.floor(Date.now() / 1000) - 86400),
+        )
         .accountsPartial({
           creator: creator.publicKey,
+          profile: profilePda,
           campaign: campaignPda,
         })
         .signers([creator])
@@ -98,6 +315,7 @@ describe("Feature 1: create_campaign", () => {
 
 describe("Feature 2: contribute", () => {
   let creator: Keypair;
+  let profilePda: PublicKey;
   let campaignPda: PublicKey;
   let vaultPda: PublicKey;
 
@@ -105,16 +323,28 @@ describe("Feature 2: contribute", () => {
     creator = Keypair.generate();
     await airdrop(provider, creator.publicKey);
 
-    [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
+    [profilePda] = getProfilePda(creator.publicKey, program.programId);
+    [campaignPda] = getCampaignPda(
+      creator.publicKey,
+      new BN(0),
+      program.programId,
+    );
     [vaultPda] = getVaultPda(campaignPda, program.programId);
 
-    const goal = new BN(1_000_000_000);
-    const deadline = new BN(Math.floor(Date.now() / 1000) + 86400);
+    await program.methods
+      .createProfile("ipfs://QmExampleHash")
+      .accountsPartial({ creator: creator.publicKey, profile: profilePda })
+      .signers([creator])
+      .rpc();
 
     await program.methods
-      .createCampaign(goal, deadline)
+      .createCampaign(
+        new BN(1_000_000_000),
+        new BN(Math.floor(Date.now() / 1000) + 86400),
+      )
       .accountsPartial({
         creator: creator.publicKey,
+        profile: profilePda,
         campaign: campaignPda,
       })
       .signers([creator])
@@ -149,7 +379,6 @@ describe("Feature 2: contribute", () => {
     );
     expect(contribution.amount.toNumber()).toBe(400_000_000);
 
-    // Vault is a bare PDA — verify it holds the lamports
     const vaultBalance = await provider.connection.getBalance(vaultPda);
     expect(vaultBalance).toBe(400_000_000);
   });
@@ -216,13 +445,11 @@ describe("Feature 2: contribute", () => {
     const campaign = await program.account.campaign.fetch(campaignPda);
     expect(campaign.raised.toNumber()).toBe(1_000_000_000);
 
-    // Contribution PDA records capped amount, not the sent 1.5 SOL
     const contribution = await program.account.contribution.fetch(
       contributionPda,
     );
     expect(contribution.amount.toNumber()).toBe(1_000_000_000);
 
-    // Vault holds exactly the goal amount
     const vaultBalance = await provider.connection.getBalance(vaultPda);
     expect(vaultBalance).toBe(1_000_000_000);
   });
@@ -253,12 +480,30 @@ describe("Feature 2: contribute", () => {
         .rpc(),
     ).rejects.toThrow(/GoalAlreadyReached/);
   });
+
+  it("❌ rejects zero amount contribution", async () => {
+    const donor = Keypair.generate();
+    await airdrop(provider, donor.publicKey);
+
+    await expect(
+      program.methods
+        .contribute(new BN(0))
+        .accountsPartial({
+          campaign: campaignPda,
+          vault: vaultPda,
+          donor: donor.publicKey,
+        })
+        .signers([donor])
+        .rpc(),
+    ).rejects.toThrow(/ZeroAmount/);
+  });
 });
 
 // ── Feature 3: withdraw ───────────────────────────────────────────────────────
 
 describe("Feature 3: withdraw", () => {
   let creator: Keypair;
+  let profilePda: PublicKey;
   let campaignPda: PublicKey;
   let vaultPda: PublicKey;
 
@@ -266,18 +511,28 @@ describe("Feature 3: withdraw", () => {
     creator = Keypair.generate();
     await airdrop(provider, creator.publicKey);
 
-    [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
+    [profilePda] = getProfilePda(creator.publicKey, program.programId);
+    [campaignPda] = getCampaignPda(
+      creator.publicKey,
+      new BN(0),
+      program.programId,
+    );
     [vaultPda] = getVaultPda(campaignPda, program.programId);
 
-    const goal = new BN(500_000_000);
-    const deadline = new BN(
-      Math.floor(Date.now() / 1000) + deadlineOffsetSeconds,
-    );
+    await program.methods
+      .createProfile("ipfs://QmExampleHash")
+      .accountsPartial({ creator: creator.publicKey, profile: profilePda })
+      .signers([creator])
+      .rpc();
 
     await program.methods
-      .createCampaign(goal, deadline)
+      .createCampaign(
+        new BN(500_000_000),
+        new BN(Math.floor(Date.now() / 1000) + deadlineOffsetSeconds),
+      )
       .accountsPartial({
         creator: creator.publicKey,
+        profile: profilePda,
         campaign: campaignPda,
       })
       .signers([creator])
@@ -325,7 +580,6 @@ describe("Feature 3: withdraw", () => {
     const campaign = await program.account.campaign.fetch(campaignPda);
     expect(campaign.claimed).toBe(true);
 
-    // Vault fully drained — bare PDA with no lamports no longer exists
     const vaultBalance = await provider.connection.getBalance(vaultPda);
     expect(vaultBalance).toBe(0);
   }, 15_000);
@@ -350,16 +604,28 @@ describe("Feature 3: withdraw", () => {
     creator = Keypair.generate();
     await airdrop(provider, creator.publicKey);
 
-    [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
+    [profilePda] = getProfilePda(creator.publicKey, program.programId);
+    [campaignPda] = getCampaignPda(
+      creator.publicKey,
+      new BN(0),
+      program.programId,
+    );
     [vaultPda] = getVaultPda(campaignPda, program.programId);
 
-    const goal = new BN(1_000_000_000);
-    const deadline = new BN(Math.floor(Date.now() / 1000) + 3);
+    await program.methods
+      .createProfile("ipfs://QmExampleHash")
+      .accountsPartial({ creator: creator.publicKey, profile: profilePda })
+      .signers([creator])
+      .rpc();
 
     await program.methods
-      .createCampaign(goal, deadline)
+      .createCampaign(
+        new BN(1_000_000_000),
+        new BN(Math.floor(Date.now() / 1000) + 3),
+      )
       .accountsPartial({
         creator: creator.publicKey,
+        profile: profilePda,
         campaign: campaignPda,
       })
       .signers([creator])
@@ -446,6 +712,7 @@ describe("Feature 3: withdraw", () => {
 describe("Feature 4: refund", () => {
   let creator: Keypair;
   let donor: Keypair;
+  let profilePda: PublicKey;
   let campaignPda: PublicKey;
   let vaultPda: PublicKey;
 
@@ -455,18 +722,28 @@ describe("Feature 4: refund", () => {
     await airdrop(provider, creator.publicKey);
     await airdrop(provider, donor.publicKey);
 
-    [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
+    [profilePda] = getProfilePda(creator.publicKey, program.programId);
+    [campaignPda] = getCampaignPda(
+      creator.publicKey,
+      new BN(0),
+      program.programId,
+    );
     [vaultPda] = getVaultPda(campaignPda, program.programId);
 
-    const goal = new BN(1_000_000_000);
-    const deadline = new BN(
-      Math.floor(Date.now() / 1000) + deadlineOffsetSeconds,
-    );
+    await program.methods
+      .createProfile("ipfs://QmExampleHash")
+      .accountsPartial({ creator: creator.publicKey, profile: profilePda })
+      .signers([creator])
+      .rpc();
 
     await program.methods
-      .createCampaign(goal, deadline)
+      .createCampaign(
+        new BN(1_000_000_000),
+        new BN(Math.floor(Date.now() / 1000) + deadlineOffsetSeconds),
+      )
       .accountsPartial({
         creator: creator.publicKey,
+        profile: profilePda,
         campaign: campaignPda,
       })
       .signers([creator])
@@ -492,7 +769,6 @@ describe("Feature 4: refund", () => {
       donor.publicKey,
       program.programId,
     );
-
     const donorBalanceBefore = await provider.connection.getBalance(
       donor.publicKey,
     );
@@ -512,11 +788,9 @@ describe("Feature 4: refund", () => {
     );
     expect(donorBalanceAfter).toBeGreaterThan(donorBalanceBefore);
 
-    // Vault fully drained
     const vaultBalance = await provider.connection.getBalance(vaultPda);
     expect(vaultBalance).toBe(0);
 
-    // Contribution account closed by `close = donor`
     const contribution = await program.account.contribution
       .fetch(contributionPda)
       .catch(() => null);
@@ -545,16 +819,28 @@ describe("Feature 4: refund", () => {
     await airdrop(provider, creator.publicKey);
     await airdrop(provider, donor.publicKey);
 
-    [campaignPda] = getCampaignPda(creator.publicKey, program.programId);
+    [profilePda] = getProfilePda(creator.publicKey, program.programId);
+    [campaignPda] = getCampaignPda(
+      creator.publicKey,
+      new BN(0),
+      program.programId,
+    );
     [vaultPda] = getVaultPda(campaignPda, program.programId);
 
-    const goal = new BN(500_000_000);
-    const deadline = new BN(Math.floor(Date.now() / 1000) + 3);
+    await program.methods
+      .createProfile("ipfs://QmExampleHash")
+      .accountsPartial({ creator: creator.publicKey, profile: profilePda })
+      .signers([creator])
+      .rpc();
 
     await program.methods
-      .createCampaign(goal, deadline)
+      .createCampaign(
+        new BN(500_000_000),
+        new BN(Math.floor(Date.now() / 1000) + 3),
+      )
       .accountsPartial({
         creator: creator.publicKey,
+        profile: profilePda,
         campaign: campaignPda,
       })
       .signers([creator])
@@ -592,7 +878,6 @@ describe("Feature 4: refund", () => {
     const nonDonor = Keypair.generate();
     await airdrop(provider, nonDonor.publicKey);
 
-    // nonDonor has no contribution PDA — constraint rejects immediately
     await expect(
       program.methods
         .refund()
@@ -620,7 +905,6 @@ describe("Feature 4: refund", () => {
       .signers([donor])
       .rpc();
 
-    // Contribution PDA closed — second call finds no account
     await expect(
       program.methods
         .refund()
