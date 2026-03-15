@@ -1,4 +1,5 @@
 use crate::error::CrowdfundError;
+use crate::event::ProfileCreated;
 use crate::state::CreatorProfile;
 use anchor_lang::prelude::*;
 
@@ -19,7 +20,8 @@ use anchor_lang::prelude::*;
 ///
 /// # Events
 ///
-/// Emits a log message indicating successful profile creation.
+/// Emits a log message indicating the profile has been created for the given creator, including the creator's public key and metadata URI.
+///
 pub fn create_profile_handler(ctx: Context<CreateProfile>, metadata_uri: String) -> Result<()> {
     require!(metadata_uri.len() <= 200, CrowdfundError::UriTooLong);
 
@@ -29,7 +31,10 @@ pub fn create_profile_handler(ctx: Context<CreateProfile>, metadata_uri: String)
     profile.metadata_uri = metadata_uri;
     profile.bump = ctx.bumps.profile;
 
-    msg!("Profile created for {}", ctx.accounts.creator.key());
+    emit!(ProfileCreated {
+        creator: ctx.accounts.creator.key(),
+        metadata_uri: ctx.accounts.profile.metadata_uri.clone(),
+    });
     Ok(())
 }
 

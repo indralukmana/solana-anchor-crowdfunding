@@ -1,4 +1,5 @@
 use crate::error::CrowdfundError;
+use crate::event::CampaignCreated;
 use crate::state::{Campaign, CreatorProfile};
 use anchor_lang::prelude::*;
 
@@ -20,7 +21,8 @@ use anchor_lang::prelude::*;
 ///
 /// # Events
 ///
-/// Emits a log message with the campaign ID, goal, and deadline upon successful creation.
+/// Emits a log message indicating successful campaign creation, including the creator's public key, campaign ID, goal, and deadline.
+///
 pub fn create_campaign_handler(
     ctx: Context<CreateCampaign>,
     goal: u64,
@@ -51,12 +53,13 @@ pub fn create_campaign_handler(
     campaign.claimed = false;
     campaign.bump = ctx.bumps.campaign;
 
-    msg!(
-        "Campaign {} created: goal={}, deadline={}",
+    emit!(CampaignCreated {
+        creator: ctx.accounts.creator.key(),
+        campaign: ctx.accounts.campaign.key(),
         campaign_id,
         goal,
-        deadline
-    );
+        deadline,
+    });
     Ok(())
 }
 

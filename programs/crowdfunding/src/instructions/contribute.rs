@@ -1,4 +1,5 @@
 use crate::error::CrowdfundError;
+use crate::event::ContributionMade;
 use crate::state::{Campaign, Contribution};
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
@@ -16,6 +17,11 @@ use anchor_lang::system_program;
 /// # Errors
 /// Returns [`CrowdfundError::ZeroAmount`] if amount is zero.
 /// Returns [`CrowdfundError::DeadlinePassed`] if the campaign deadline has passed.
+///
+/// # Events
+///
+/// Emits a log message indicating a contribution has been made, including the campaign ID, donor's public key, contributed amount, and total raised amount after the contribution.
+///
 pub fn contribute_handler(ctx: Context<Contribute>, amount: u64) -> Result<()> {
     let clock = Clock::get()?;
 
@@ -46,11 +52,12 @@ pub fn contribute_handler(ctx: Context<Contribute>, amount: u64) -> Result<()> {
     ctx.accounts.contribution.campaign = campaign_key;
     ctx.accounts.contribution.amount = ctx.accounts.contribution.amount.saturating_add(amount);
 
-    msg!(
-        "Contributed: {} lamports, total raised={}",
+    emit!(ContributionMade {
+        campaign: campaign_key,
+        donor: donor_key,
         amount,
-        ctx.accounts.campaign.raised
-    );
+        total_raised: ctx.accounts.campaign.raised,
+    });
     Ok(())
 }
 
