@@ -762,14 +762,14 @@ describe("Feature 3: withdraw", () => {
     expect(campaign.claimed).toBe(true);
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
-    const vaultRent = await provider.connection.getMinimumBalanceForRentExemption(0);
-    expect(vaultBalance).toBe(vaultRent);
+    expect(vaultBalance).toBe(0);
 
     const events = await parseEvents(provider, program, txSig);
     const event = findEvent(events, "fundsWithdrawn");
     expect(event.data.campaign.toBase58()).toBe(campaignPda.toBase58());
     expect(event.data.creator.toBase58()).toBe(creator.publicKey.toBase58());
-    expect(event.data.amount.toNumber()).toBe(500_000_000);
+    const vaultRent = await provider.connection.getMinimumBalanceForRentExemption(0);
+    expect(event.data.amount.toNumber()).toBe(500_000_000 + vaultRent);
   }, 15_000);
 
   it("❌ rejects withdraw before deadline", async () => {
