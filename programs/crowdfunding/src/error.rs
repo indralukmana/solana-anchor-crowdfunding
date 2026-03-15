@@ -20,7 +20,7 @@ pub enum CrowdfundError {
     NothingToRefund,
     #[msg("Metadata URI exceeds maximum length of 200 characters")]
     UriTooLong,
-    #[msg("Contribution amount must be greater than zero")]
+    #[msg("Must be greater than zero")]
     ZeroAmount,
     #[msg("Campaign count overflow")]
     CampaignCountOverflow,
