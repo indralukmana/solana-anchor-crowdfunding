@@ -22,4 +22,6 @@ pub enum CrowdfundError {
     UriTooLong,
     #[msg("Contribution amount must be greater than zero")]
     ZeroAmount,
+    #[msg("Campaign count overflow")]
+    CampaignCountOverflow,
 }

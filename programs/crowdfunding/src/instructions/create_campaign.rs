@@ -35,8 +35,12 @@ pub fn create_campaign_handler(
     let campaign_id = ctx.accounts.profile.campaign_count;
 
     // Increment counter for next campaign
-    ctx.accounts.profile.campaign_count =
-        ctx.accounts.profile.campaign_count.checked_add(1).unwrap();
+    ctx.accounts.profile.campaign_count = ctx
+        .accounts
+        .profile
+        .campaign_count
+        .checked_add(1)
+        .ok_or(CrowdfundError::CampaignCountOverflow)?;
 
     let campaign = &mut ctx.accounts.campaign;
     campaign.creator = ctx.accounts.creator.key();
