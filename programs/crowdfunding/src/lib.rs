@@ -17,6 +17,10 @@ pub mod crowdfunding {
         create_profile_handler(ctx, metadata_uri)
     }
 
+    pub fn update_profile(ctx: Context<UpdateProfile>, metadata_uri: String) -> Result<()> {
+        update_profile_handler(ctx, metadata_uri)
+    }
+
     pub fn create_campaign(ctx: Context<CreateCampaign>, goal: u64, deadline: i64) -> Result<()> {
         create_campaign_handler(ctx, goal, deadline)
     }
