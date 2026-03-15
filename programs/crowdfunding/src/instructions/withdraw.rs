@@ -56,8 +56,10 @@ pub fn withdraw_handler(ctx: Context<Withdraw>) -> Result<()> {
 
     ctx.accounts.campaign.claimed = true;
 
+    let balance = ctx.accounts.vault.lamports();
+
     invoke_signed(
-        &system_instruction::transfer(ctx.accounts.vault.key, ctx.accounts.creator.key, raised),
+        &system_instruction::transfer(ctx.accounts.vault.key, ctx.accounts.creator.key, balance),
         &[
             ctx.accounts.vault.to_account_info(),
             ctx.accounts.creator.to_account_info(),
@@ -69,7 +71,7 @@ pub fn withdraw_handler(ctx: Context<Withdraw>) -> Result<()> {
     emit!(FundsWithdrawn {
         campaign: campaign_key,
         creator: ctx.accounts.creator.key(),
-        amount: raised,
+        amount: balance,
     });
     Ok(())
 }
