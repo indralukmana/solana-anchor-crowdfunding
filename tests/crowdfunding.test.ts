@@ -444,7 +444,8 @@ describe("Feature 2: contribute", () => {
     expect(contribution.amount.toNumber()).toBe(400_000_000);
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
-    expect(vaultBalance).toBe(400_000_000);
+    const vaultRent = await provider.connection.getMinimumBalanceForRentExemption(0);
+    expect(vaultBalance).toBe(400_000_000 + vaultRent);
 
     const events = await parseEvents(provider, program, txSig);
     const event = findEvent(events, "contributionMade");
@@ -500,7 +501,8 @@ describe("Feature 2: contribute", () => {
     expect(contribution.amount.toNumber()).toBe(600_000_000);
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
-    expect(vaultBalance).toBe(600_000_000);
+    const vaultRent = await provider.connection.getMinimumBalanceForRentExemption(0);
+    expect(vaultBalance).toBe(600_000_000 + vaultRent);
 
     const events = await parseEvents(provider, program, txSig);
     const event = findEvent(events, "contributionMade");
@@ -547,7 +549,8 @@ describe("Feature 2: contribute", () => {
     expect(contribution.amount.toNumber()).toBe(1_500_000_000);
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
-    expect(vaultBalance).toBe(1_500_000_000);
+    const vaultRent = await provider.connection.getMinimumBalanceForRentExemption(0);
+    expect(vaultBalance).toBe(1_500_000_000 + vaultRent);
 
     const events = await parseEvents(provider, program, txSig);
     const event = findEvent(events, "contributionMade");
@@ -591,7 +594,8 @@ describe("Feature 2: contribute", () => {
     expect(campaign.raised.toNumber()).toBe(1_600_000_000);
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
-    expect(vaultBalance).toBe(1_600_000_000);
+    const vaultRent = await provider.connection.getMinimumBalanceForRentExemption(0);
+    expect(vaultBalance).toBe(1_600_000_000 + vaultRent);
   });
 
   it("❌ rejects zero amount contribution", async () => {
@@ -758,7 +762,8 @@ describe("Feature 3: withdraw", () => {
     expect(campaign.claimed).toBe(true);
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
-    expect(vaultBalance).toBe(0);
+    const vaultRent = await provider.connection.getMinimumBalanceForRentExemption(0);
+    expect(vaultBalance).toBe(vaultRent);
 
     const events = await parseEvents(provider, program, txSig);
     const event = findEvent(events, "fundsWithdrawn");
@@ -978,7 +983,8 @@ describe("Feature 4: refund", () => {
     expect(donorBalanceAfter).toBeGreaterThan(donorBalanceBefore);
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
-    expect(vaultBalance).toBe(0);
+    const vaultRent = await provider.connection.getMinimumBalanceForRentExemption(0);
+    expect(vaultBalance).toBe(vaultRent);
 
     const contribution = await program.account.contribution
       .fetch(contributionPda)
