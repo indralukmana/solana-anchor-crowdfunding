@@ -6,7 +6,12 @@
     "module": "commonjs",
     "target": "es6",
     "esModuleInterop": true,
-    "strict": true
+    "strict": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@crowdfunding/sdk": ["../../packages/crowdfunding-sdk/src"]
+    }
   },
   "include": ["tests/**/*"]
 }
