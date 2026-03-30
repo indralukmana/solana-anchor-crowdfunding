@@ -1,7 +1,16 @@
 import * as anchor from "@coral-xyz/anchor";
 import { AnchorProvider, BN, EventParser, Program } from "@coral-xyz/anchor";
-import { Crowdfunding } from "../target/types/crowdfunding";
+import { Crowdfunding } from "@crowdfunding/sdk";
 import { Keypair, PublicKey } from "@solana/web3.js";
+
+import {
+  getProfilePda,
+  getCampaignPda,
+  getVaultPda,
+  getContributionPda,
+  parseEvents,
+  findEvent,
+} from "@crowdfunding/sdk";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -12,78 +21,8 @@ const airdrop = async (provider: AnchorProvider, pubkey: PublicKey) => {
   const latestBlockhash = await provider.connection.getLatestBlockhash();
   await provider.connection.confirmTransaction(
     { signature: sig, ...latestBlockhash },
-    "confirmed",
+    "confirmed"
   );
-};
-
-const getProfilePda = (creator: PublicKey, programId: PublicKey) =>
-  PublicKey.findProgramAddressSync(
-    [Buffer.from("profile"), creator.toBuffer()],
-    programId,
-  );
-
-const getCampaignPda = (
-  creator: PublicKey,
-  campaignCount: BN,
-  programId: PublicKey,
-) =>
-  PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("campaign"),
-      creator.toBuffer(),
-      campaignCount.toArrayLike(Buffer, "le", 8),
-    ],
-    programId,
-  );
-
-const getVaultPda = (campaignPda: PublicKey, programId: PublicKey) =>
-  PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), campaignPda.toBuffer()],
-    programId,
-  );
-
-const getContributionPda = (
-  campaignPda: PublicKey,
-  donor: PublicKey,
-  programId: PublicKey,
-) =>
-  PublicKey.findProgramAddressSync(
-    [Buffer.from("contribution"), campaignPda.toBuffer(), donor.toBuffer()],
-    programId,
-  );
-
-// Parses all Anchor events from a confirmed transaction's log messages.
-const parseEvents = async (
-  provider: AnchorProvider,
-  program: Program<Crowdfunding>,
-  txSig: string,
-): Promise<anchor.Event[]> => {
-  const tx = await provider.connection.getTransaction(txSig, {
-    commitment: "confirmed",
-    maxSupportedTransactionVersion: 0,
-  });
-  const logs = tx?.meta?.logMessages ?? [];
-  const parser = new EventParser(program.programId, program.coder);
-  const events: anchor.Event[] = [];
-  for (const event of parser.parseLogs(logs)) {
-    events.push(event);
-  }
-  return events;
-};
-
-// Finds an event by name — throws with a clear message if absent.
-// Throwing here narrows the return type to anchor.Event (never null),
-// eliminating the TS "possibly null" error on all .data accesses below.
-const findEvent = (events: anchor.Event[], name: string): anchor.Event => {
-  const event = events.find((e) => e?.name === name);
-  if (!event) {
-    throw new Error(
-      `Expected event "${name}" not found in transaction logs.\nEmitted events: [${
-        events.map((e) => e.name).join(", ") || "none"
-      }]`,
-    );
-  }
-  return event;
 };
 
 // ── Shared setup ──────────────────────────────────────────────────────────────
@@ -92,7 +31,7 @@ const envProvider = AnchorProvider.env();
 const provider = new AnchorProvider(
   envProvider.connection,
   envProvider.wallet,
-  { commitment: "confirmed", preflightCommitment: "confirmed" },
+  { commitment: "confirmed", preflightCommitment: "confirmed" }
 );
 anchor.setProvider(provider);
 
@@ -166,12 +105,12 @@ describe("Feature 0: profile", () => {
     const [campaignPda1] = getCampaignPda(
       creator.publicKey,
       new BN(0),
-      program.programId,
+      program.programId
     );
     await program.methods
       .createCampaign(
         new BN(1_000_000_000),
-        new BN(Math.floor(Date.now() / 1000) + 86400),
+        new BN(Math.floor(Date.now() / 1000) + 86400)
       )
       .accountsPartial({
         creator: creator.publicKey,
@@ -182,19 +121,19 @@ describe("Feature 0: profile", () => {
       .rpc();
 
     const profileAfterFirst = await program.account.creatorProfile.fetch(
-      profilePda,
+      profilePda
     );
     expect(profileAfterFirst.campaignCount.toNumber()).toBe(1);
 
     const [campaignPda2] = getCampaignPda(
       creator.publicKey,
       new BN(1),
-      program.programId,
+      program.programId
     );
     await program.methods
       .createCampaign(
         new BN(500_000_000),
-        new BN(Math.floor(Date.now() / 1000) + 86400),
+        new BN(Math.floor(Date.now() / 1000) + 86400)
       )
       .accountsPartial({
         creator: creator.publicKey,
@@ -205,7 +144,7 @@ describe("Feature 0: profile", () => {
       .rpc();
 
     const profileAfterSecond = await program.account.creatorProfile.fetch(
-      profilePda,
+      profilePda
     );
     expect(profileAfterSecond.campaignCount.toNumber()).toBe(2);
 
@@ -227,7 +166,7 @@ describe("Feature 0: profile", () => {
         .createProfile(longUri)
         .accountsPartial({ creator: creator.publicKey, profile: profilePda })
         .signers([creator])
-        .rpc(),
+        .rpc()
     ).rejects.toThrow(/UriTooLong/);
   });
 
@@ -250,7 +189,7 @@ describe("Feature 0: profile", () => {
         .updateProfile("ipfs://QmHackedHash")
         .accountsPartial({ creator: nonCreator.publicKey, profile: profilePda })
         .signers([nonCreator])
-        .rpc(),
+        .rpc()
     ).rejects.toThrow(/ConstraintHasOne|HasOneViolated|ConstraintSeeds/);
   });
 
@@ -262,14 +201,14 @@ describe("Feature 0: profile", () => {
     const [campaignPda] = getCampaignPda(
       creator.publicKey,
       new BN(0),
-      program.programId,
+      program.programId
     );
 
     await expect(
       program.methods
         .createCampaign(
           new BN(1_000_000_000),
-          new BN(Math.floor(Date.now() / 1000) + 86400),
+          new BN(Math.floor(Date.now() / 1000) + 86400)
         )
         .accountsPartial({
           creator: creator.publicKey,
@@ -277,7 +216,7 @@ describe("Feature 0: profile", () => {
           campaign: campaignPda,
         })
         .signers([creator])
-        .rpc(),
+        .rpc()
     ).rejects.toThrow(/AccountNotInitialized|AccountDiscriminatorNotFound/);
   });
 });
@@ -293,7 +232,7 @@ describe("Feature 1: create_campaign", () => {
     const [campaignPda] = getCampaignPda(
       creator.publicKey,
       new BN(0),
-      program.programId,
+      program.programId
     );
 
     await program.methods
@@ -339,7 +278,7 @@ describe("Feature 1: create_campaign", () => {
     const [campaignPda] = getCampaignPda(
       creator.publicKey,
       new BN(0),
-      program.programId,
+      program.programId
     );
 
     await program.methods
@@ -352,7 +291,7 @@ describe("Feature 1: create_campaign", () => {
       program.methods
         .createCampaign(
           new BN(1_000_000_000),
-          new BN(Math.floor(Date.now() / 1000) - 86400),
+          new BN(Math.floor(Date.now() / 1000) - 86400)
         )
         .accountsPartial({
           creator: creator.publicKey,
@@ -360,7 +299,7 @@ describe("Feature 1: create_campaign", () => {
           campaign: campaignPda,
         })
         .signers([creator])
-        .rpc(),
+        .rpc()
     ).rejects.toThrow(/InvalidDeadline/);
   });
 });
@@ -381,7 +320,7 @@ describe("Feature 2: contribute", () => {
     [campaignPda] = getCampaignPda(
       creator.publicKey,
       new BN(0),
-      program.programId,
+      program.programId
     );
     [vaultPda] = getVaultPda(campaignPda, program.programId);
 
@@ -394,7 +333,7 @@ describe("Feature 2: contribute", () => {
     await program.methods
       .createCampaign(
         new BN(1_000_000_000),
-        new BN(Math.floor(Date.now() / 1000) + 86400),
+        new BN(Math.floor(Date.now() / 1000) + 86400)
       )
       .accountsPartial({
         creator: creator.publicKey,
@@ -412,7 +351,7 @@ describe("Feature 2: contribute", () => {
     const [contributionPda] = getContributionPda(
       campaignPda,
       donor.publicKey,
-      program.programId,
+      program.programId
     );
 
     await program.methods
@@ -439,12 +378,13 @@ describe("Feature 2: contribute", () => {
     expect(campaign.raised.toNumber()).toBe(400_000_000);
 
     const contribution = await program.account.contribution.fetch(
-      contributionPda,
+      contributionPda
     );
     expect(contribution.amount.toNumber()).toBe(400_000_000);
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
-    const vaultRent = await provider.connection.getMinimumBalanceForRentExemption(0);
+    const vaultRent =
+      await provider.connection.getMinimumBalanceForRentExemption(0);
     expect(vaultBalance).toBe(400_000_000 + vaultRent);
 
     const events = await parseEvents(provider, program, txSig);
@@ -462,7 +402,7 @@ describe("Feature 2: contribute", () => {
     const [contributionPda] = getContributionPda(
       campaignPda,
       donor.publicKey,
-      program.programId,
+      program.programId
     );
 
     await program.methods
@@ -496,12 +436,13 @@ describe("Feature 2: contribute", () => {
       .rpc();
 
     const contribution = await program.account.contribution.fetch(
-      contributionPda,
+      contributionPda
     );
     expect(contribution.amount.toNumber()).toBe(600_000_000);
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
-    const vaultRent = await provider.connection.getMinimumBalanceForRentExemption(0);
+    const vaultRent =
+      await provider.connection.getMinimumBalanceForRentExemption(0);
     expect(vaultBalance).toBe(600_000_000 + vaultRent);
 
     const events = await parseEvents(provider, program, txSig);
@@ -517,7 +458,7 @@ describe("Feature 2: contribute", () => {
     const [contributionPda] = getContributionPda(
       campaignPda,
       donor.publicKey,
-      program.programId,
+      program.programId
     );
 
     await program.methods
@@ -544,12 +485,13 @@ describe("Feature 2: contribute", () => {
     expect(campaign.raised.toNumber()).toBe(1_500_000_000);
 
     const contribution = await program.account.contribution.fetch(
-      contributionPda,
+      contributionPda
     );
     expect(contribution.amount.toNumber()).toBe(1_500_000_000);
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
-    const vaultRent = await provider.connection.getMinimumBalanceForRentExemption(0);
+    const vaultRent =
+      await provider.connection.getMinimumBalanceForRentExemption(0);
     expect(vaultBalance).toBe(1_500_000_000 + vaultRent);
 
     const events = await parseEvents(provider, program, txSig);
@@ -564,8 +506,20 @@ describe("Feature 2: contribute", () => {
     await airdrop(provider, donor1.publicKey);
     await airdrop(provider, donor2.publicKey);
 
-    const [contributionPda1] = getContributionPda(campaignPda, donor1.publicKey, program.programId);
-    await program.methods.initializeContribution().accountsPartial({ campaign: campaignPda, contribution: contributionPda1, donor: donor1.publicKey }).signers([donor1]).rpc();
+    const [contributionPda1] = getContributionPda(
+      campaignPda,
+      donor1.publicKey,
+      program.programId
+    );
+    await program.methods
+      .initializeContribution()
+      .accountsPartial({
+        campaign: campaignPda,
+        contribution: contributionPda1,
+        donor: donor1.publicKey,
+      })
+      .signers([donor1])
+      .rpc();
 
     await program.methods
       .contribute(new BN(800_000_000))
@@ -577,8 +531,20 @@ describe("Feature 2: contribute", () => {
       .signers([donor1])
       .rpc();
 
-    const [contributionPda2] = getContributionPda(campaignPda, donor2.publicKey, program.programId);
-    await program.methods.initializeContribution().accountsPartial({ campaign: campaignPda, contribution: contributionPda2, donor: donor2.publicKey }).signers([donor2]).rpc();
+    const [contributionPda2] = getContributionPda(
+      campaignPda,
+      donor2.publicKey,
+      program.programId
+    );
+    await program.methods
+      .initializeContribution()
+      .accountsPartial({
+        campaign: campaignPda,
+        contribution: contributionPda2,
+        donor: donor2.publicKey,
+      })
+      .signers([donor2])
+      .rpc();
 
     await program.methods
       .contribute(new BN(800_000_000))
@@ -594,7 +560,8 @@ describe("Feature 2: contribute", () => {
     expect(campaign.raised.toNumber()).toBe(1_600_000_000);
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
-    const vaultRent = await provider.connection.getMinimumBalanceForRentExemption(0);
+    const vaultRent =
+      await provider.connection.getMinimumBalanceForRentExemption(0);
     expect(vaultBalance).toBe(1_600_000_000 + vaultRent);
   });
 
@@ -602,8 +569,20 @@ describe("Feature 2: contribute", () => {
     const donor = Keypair.generate();
     await airdrop(provider, donor.publicKey);
 
-    const [contributionPda] = getContributionPda(campaignPda, donor.publicKey, program.programId);
-    await program.methods.initializeContribution().accountsPartial({ campaign: campaignPda, contribution: contributionPda, donor: donor.publicKey }).signers([donor]).rpc();
+    const [contributionPda] = getContributionPda(
+      campaignPda,
+      donor.publicKey,
+      program.programId
+    );
+    await program.methods
+      .initializeContribution()
+      .accountsPartial({
+        campaign: campaignPda,
+        contribution: contributionPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
 
     await expect(
       program.methods
@@ -614,7 +593,7 @@ describe("Feature 2: contribute", () => {
           donor: donor.publicKey,
         })
         .signers([donor])
-        .rpc(),
+        .rpc()
     ).rejects.toThrow(/ZeroAmount/);
   });
 
@@ -624,12 +603,12 @@ describe("Feature 2: contribute", () => {
 
     const [shortProfilePda] = getProfilePda(
       shortCreator.publicKey,
-      program.programId,
+      program.programId
     );
     const [shortCampaignPda] = getCampaignPda(
       shortCreator.publicKey,
       new BN(0),
-      program.programId,
+      program.programId
     );
     const [shortVaultPda] = getVaultPda(shortCampaignPda, program.programId);
 
@@ -645,7 +624,7 @@ describe("Feature 2: contribute", () => {
     await program.methods
       .createCampaign(
         new BN(1_000_000_000),
-        new BN(Math.floor(Date.now() / 1000) + 3),
+        new BN(Math.floor(Date.now() / 1000) + 3)
       )
       .accountsPartial({
         creator: shortCreator.publicKey,
@@ -660,8 +639,20 @@ describe("Feature 2: contribute", () => {
     const donor = Keypair.generate();
     await airdrop(provider, donor.publicKey);
 
-    const [contributionPda] = getContributionPda(shortCampaignPda, donor.publicKey, program.programId);
-    await program.methods.initializeContribution().accountsPartial({ campaign: shortCampaignPda, contribution: contributionPda, donor: donor.publicKey }).signers([donor]).rpc();
+    const [contributionPda] = getContributionPda(
+      shortCampaignPda,
+      donor.publicKey,
+      program.programId
+    );
+    await program.methods
+      .initializeContribution()
+      .accountsPartial({
+        campaign: shortCampaignPda,
+        contribution: contributionPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
 
     await expect(
       program.methods
@@ -672,7 +663,7 @@ describe("Feature 2: contribute", () => {
           donor: donor.publicKey,
         })
         .signers([donor])
-        .rpc(),
+        .rpc()
     ).rejects.toThrow(/DeadlinePassed/);
   }, 15_000);
 });
@@ -693,7 +684,7 @@ describe("Feature 3: withdraw", () => {
     [campaignPda] = getCampaignPda(
       creator.publicKey,
       new BN(0),
-      program.programId,
+      program.programId
     );
     [vaultPda] = getVaultPda(campaignPda, program.programId);
 
@@ -706,7 +697,7 @@ describe("Feature 3: withdraw", () => {
     await program.methods
       .createCampaign(
         new BN(500_000_000),
-        new BN(Math.floor(Date.now() / 1000) + deadlineOffsetSeconds),
+        new BN(Math.floor(Date.now() / 1000) + deadlineOffsetSeconds)
       )
       .accountsPartial({
         creator: creator.publicKey,
@@ -719,8 +710,20 @@ describe("Feature 3: withdraw", () => {
     const donor = Keypair.generate();
     await airdrop(provider, donor.publicKey);
 
-    const [contributionPda] = getContributionPda(campaignPda, donor.publicKey, program.programId);
-    await program.methods.initializeContribution().accountsPartial({ campaign: campaignPda, contribution: contributionPda, donor: donor.publicKey }).signers([donor]).rpc();
+    const [contributionPda] = getContributionPda(
+      campaignPda,
+      donor.publicKey,
+      program.programId
+    );
+    await program.methods
+      .initializeContribution()
+      .accountsPartial({
+        campaign: campaignPda,
+        contribution: contributionPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
 
     await program.methods
       .contribute(new BN(500_000_000))
@@ -740,7 +743,7 @@ describe("Feature 3: withdraw", () => {
     await sleep(5000);
 
     const creatorBalanceBefore = await provider.connection.getBalance(
-      creator.publicKey,
+      creator.publicKey
     );
 
     const txSig = await program.methods
@@ -754,7 +757,7 @@ describe("Feature 3: withdraw", () => {
       .rpc();
 
     const creatorBalanceAfter = await provider.connection.getBalance(
-      creator.publicKey,
+      creator.publicKey
     );
     expect(creatorBalanceAfter).toBeGreaterThan(creatorBalanceBefore);
 
@@ -768,7 +771,8 @@ describe("Feature 3: withdraw", () => {
     const event = findEvent(events, "fundsWithdrawn");
     expect(event.data.campaign.toBase58()).toBe(campaignPda.toBase58());
     expect(event.data.creator.toBase58()).toBe(creator.publicKey.toBase58());
-    const vaultRent = await provider.connection.getMinimumBalanceForRentExemption(0);
+    const vaultRent =
+      await provider.connection.getMinimumBalanceForRentExemption(0);
     expect(event.data.amount.toNumber()).toBe(500_000_000 + vaultRent);
   }, 15_000);
 
@@ -784,7 +788,7 @@ describe("Feature 3: withdraw", () => {
           vault: vaultPda,
         })
         .signers([creator])
-        .rpc(),
+        .rpc()
     ).rejects.toThrow(/DeadlineNotReached/);
   });
 
@@ -796,7 +800,7 @@ describe("Feature 3: withdraw", () => {
     [campaignPda] = getCampaignPda(
       creator.publicKey,
       new BN(0),
-      program.programId,
+      program.programId
     );
     [vaultPda] = getVaultPda(campaignPda, program.programId);
 
@@ -809,7 +813,7 @@ describe("Feature 3: withdraw", () => {
     await program.methods
       .createCampaign(
         new BN(1_000_000_000),
-        new BN(Math.floor(Date.now() / 1000) + 3),
+        new BN(Math.floor(Date.now() / 1000) + 3)
       )
       .accountsPartial({
         creator: creator.publicKey,
@@ -822,8 +826,20 @@ describe("Feature 3: withdraw", () => {
     const donor = Keypair.generate();
     await airdrop(provider, donor.publicKey);
 
-    const [contributionPda] = getContributionPda(campaignPda, donor.publicKey, program.programId);
-    await program.methods.initializeContribution().accountsPartial({ campaign: campaignPda, contribution: contributionPda, donor: donor.publicKey }).signers([donor]).rpc();
+    const [contributionPda] = getContributionPda(
+      campaignPda,
+      donor.publicKey,
+      program.programId
+    );
+    await program.methods
+      .initializeContribution()
+      .accountsPartial({
+        campaign: campaignPda,
+        contribution: contributionPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
 
     await program.methods
       .contribute(new BN(400_000_000))
@@ -846,7 +862,7 @@ describe("Feature 3: withdraw", () => {
           vault: vaultPda,
         })
         .signers([creator])
-        .rpc(),
+        .rpc()
     ).rejects.toThrow(/GoalNotReached/);
   }, 15_000);
 
@@ -866,7 +882,7 @@ describe("Feature 3: withdraw", () => {
           vault: vaultPda,
         })
         .signers([nonCreator])
-        .rpc(),
+        .rpc()
     ).rejects.toThrow(/Unauthorized/);
   }, 15_000);
 
@@ -893,7 +909,7 @@ describe("Feature 3: withdraw", () => {
           vault: vaultPda,
         })
         .signers([creator])
-        .rpc(),
+        .rpc()
     ).rejects.toThrow(/AlreadyClaimed/);
   }, 15_000);
 });
@@ -917,7 +933,7 @@ describe("Feature 4: refund", () => {
     [campaignPda] = getCampaignPda(
       creator.publicKey,
       new BN(0),
-      program.programId,
+      program.programId
     );
     [vaultPda] = getVaultPda(campaignPda, program.programId);
 
@@ -930,7 +946,7 @@ describe("Feature 4: refund", () => {
     await program.methods
       .createCampaign(
         new BN(1_000_000_000),
-        new BN(Math.floor(Date.now() / 1000) + deadlineOffsetSeconds),
+        new BN(Math.floor(Date.now() / 1000) + deadlineOffsetSeconds)
       )
       .accountsPartial({
         creator: creator.publicKey,
@@ -940,8 +956,20 @@ describe("Feature 4: refund", () => {
       .signers([creator])
       .rpc();
 
-    const [contributionPda] = getContributionPda(campaignPda, donor.publicKey, program.programId);
-    await program.methods.initializeContribution().accountsPartial({ campaign: campaignPda, contribution: contributionPda, donor: donor.publicKey }).signers([donor]).rpc();
+    const [contributionPda] = getContributionPda(
+      campaignPda,
+      donor.publicKey,
+      program.programId
+    );
+    await program.methods
+      .initializeContribution()
+      .accountsPartial({
+        campaign: campaignPda,
+        contribution: contributionPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
 
     await program.methods
       .contribute(new BN(400_000_000))
@@ -961,10 +989,10 @@ describe("Feature 4: refund", () => {
     const [contributionPda] = getContributionPda(
       campaignPda,
       donor.publicKey,
-      program.programId,
+      program.programId
     );
     const donorBalanceBefore = await provider.connection.getBalance(
-      donor.publicKey,
+      donor.publicKey
     );
 
     const txSig = await program.methods
@@ -978,12 +1006,13 @@ describe("Feature 4: refund", () => {
       .rpc();
 
     const donorBalanceAfter = await provider.connection.getBalance(
-      donor.publicKey,
+      donor.publicKey
     );
     expect(donorBalanceAfter).toBeGreaterThan(donorBalanceBefore);
 
     const vaultBalance = await provider.connection.getBalance(vaultPda);
-    const vaultRent = await provider.connection.getMinimumBalanceForRentExemption(0);
+    const vaultRent =
+      await provider.connection.getMinimumBalanceForRentExemption(0);
     expect(vaultBalance).toBe(vaultRent);
 
     const contribution = await program.account.contribution
@@ -1010,7 +1039,7 @@ describe("Feature 4: refund", () => {
           donor: donor.publicKey,
         })
         .signers([donor])
-        .rpc(),
+        .rpc()
     ).rejects.toThrow(/DeadlineNotReached/);
   });
 
@@ -1024,7 +1053,7 @@ describe("Feature 4: refund", () => {
     [campaignPda] = getCampaignPda(
       creator.publicKey,
       new BN(0),
-      program.programId,
+      program.programId
     );
     [vaultPda] = getVaultPda(campaignPda, program.programId);
 
@@ -1037,7 +1066,7 @@ describe("Feature 4: refund", () => {
     await program.methods
       .createCampaign(
         new BN(500_000_000),
-        new BN(Math.floor(Date.now() / 1000) + 3),
+        new BN(Math.floor(Date.now() / 1000) + 3)
       )
       .accountsPartial({
         creator: creator.publicKey,
@@ -1047,8 +1076,20 @@ describe("Feature 4: refund", () => {
       .signers([creator])
       .rpc();
 
-    const [contributionPda] = getContributionPda(campaignPda, donor.publicKey, program.programId);
-    await program.methods.initializeContribution().accountsPartial({ campaign: campaignPda, contribution: contributionPda, donor: donor.publicKey }).signers([donor]).rpc();
+    const [contributionPda] = getContributionPda(
+      campaignPda,
+      donor.publicKey,
+      program.programId
+    );
+    await program.methods
+      .initializeContribution()
+      .accountsPartial({
+        campaign: campaignPda,
+        contribution: contributionPda,
+        donor: donor.publicKey,
+      })
+      .signers([donor])
+      .rpc();
 
     await program.methods
       .contribute(new BN(600_000_000))
@@ -1071,7 +1112,7 @@ describe("Feature 4: refund", () => {
           donor: donor.publicKey,
         })
         .signers([donor])
-        .rpc(),
+        .rpc()
     ).rejects.toThrow(/GoalAlreadyReached/);
   }, 15_000);
 
@@ -1091,7 +1132,7 @@ describe("Feature 4: refund", () => {
           donor: nonDonor.publicKey,
         })
         .signers([nonDonor])
-        .rpc(),
+        .rpc()
     ).rejects.toThrow(/AccountNotInitialized|AccountDiscriminatorNotFound/);
   }, 15_000);
 
@@ -1118,7 +1159,7 @@ describe("Feature 4: refund", () => {
           donor: donor.publicKey,
         })
         .signers([donor])
-        .rpc(),
+        .rpc()
     ).rejects.toThrow(/AccountNotInitialized|AccountDiscriminatorNotFound/);
   }, 15_000);
 });
