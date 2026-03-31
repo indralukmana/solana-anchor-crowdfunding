@@ -1,9 +1,9 @@
 import * as anchor from "@coral-xyz/anchor";
-import { AnchorProvider, EventParser, Program } from "@coral-xyz/anchor";
+import { Provider, EventParser, Program } from "@coral-xyz/anchor";
 
 // Parses all Anchor events from a confirmed transaction's log messages.
 export const parseEvents = async (
-  provider: AnchorProvider,
+  provider: Provider,
   program: Program<any>,
   txSig: string,
 ): Promise<anchor.Event[]> => {

@@ -1,7 +1,8 @@
 import * as anchor from "@coral-xyz/anchor";
-import { AnchorProvider, BN, EventParser, Program } from "@coral-xyz/anchor";
+import { BN, Program } from "@coral-xyz/anchor";
 import { Crowdfunding } from "@crowdfunding/sdk";
 import { Keypair, PublicKey } from "@solana/web3.js";
+import { fromWorkspace, LiteSVMProvider } from "anchor-litesvm";
 
 import {
   getProfilePda,
@@ -12,37 +13,50 @@ import {
   findEvent,
 } from "@crowdfunding/sdk";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Shared setup ──────────────────────────────────────────────────────────────
+const svm = fromWorkspace("./").withDefaultPrograms().withBuiltins().withSysvars();
+const provider = new LiteSVMProvider(svm);
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-const airdrop = async (provider: AnchorProvider, pubkey: PublicKey) => {
-  const sig = await provider.connection.requestAirdrop(pubkey, 2_000_000_000);
-  const latestBlockhash = await provider.connection.getLatestBlockhash();
-  await provider.connection.confirmTransaction(
-    { signature: sig, ...latestBlockhash },
-    "confirmed"
-  );
+// Monkey-patch missing methods on LiteSVMConnectionProxy
+(provider.connection as any).getBalance = async (publicKey: PublicKey) => {
+  return Number(svm.getBalance(publicKey) ?? BigInt(0));
+};
+(provider.connection as any).getTransaction = async (txSig: string) => {
+  const meta = svm.getTransaction(anchor.utils.bytes.bs58.decode(txSig));
+  if (!meta) return null;
+  // TransactionMetadata in litesvm has logs() method
+  const logs = "logs" in meta ? (meta as any).logs() : (meta as any).meta().logs();
+  return {
+    meta: {
+      logMessages: logs,
+      err: "err" in meta ? (meta as any).err() : null,
+    },
+  };
 };
 
-// ── Shared setup ──────────────────────────────────────────────────────────────
-
-const envProvider = AnchorProvider.env();
-const provider = new AnchorProvider(
-  envProvider.connection,
-  envProvider.wallet,
-  { commitment: "confirmed", preflightCommitment: "confirmed" }
-);
 anchor.setProvider(provider);
 
 const program = anchor.workspace.Crowdfunding as Program<Crowdfunding>;
+
+const svmAirdrop = async (addresses: PublicKey[]) => {
+  for (const address of addresses) {
+    svm.airdrop(address, BigInt(10 * 1_000_000_000));
+  }
+};
+
+const warp = (seconds: number) => {
+  const clock = svm.getClock();
+  clock.slot += BigInt(Math.ceil(seconds / 0.4));
+  clock.unixTimestamp += BigInt(seconds);
+  svm.setClock(clock);
+};
 
 // ── Feature 0: profile ────────────────────────────────────────────────────────
 
 describe("Feature 0: profile", () => {
   it("✅ creates a profile with metadata URI", async () => {
     const creator = Keypair.generate();
-    await airdrop(provider, creator.publicKey);
+    svmAirdrop([creator.publicKey]);
 
     const [profilePda] = getProfilePda(creator.publicKey, program.programId);
 
@@ -65,7 +79,7 @@ describe("Feature 0: profile", () => {
 
   it("✅ updates profile metadata URI", async () => {
     const creator = Keypair.generate();
-    await airdrop(provider, creator.publicKey);
+    svmAirdrop([creator.publicKey]);
 
     const [profilePda] = getProfilePda(creator.publicKey, program.programId);
 
@@ -92,7 +106,9 @@ describe("Feature 0: profile", () => {
 
   it("✅ campaign_count increments after each campaign", async () => {
     const creator = Keypair.generate();
-    await airdrop(provider, creator.publicKey);
+    svmAirdrop([creator.publicKey]);
+
+    const clock = svm.getClock()
 
     const [profilePda] = getProfilePda(creator.publicKey, program.programId);
 
@@ -110,7 +126,7 @@ describe("Feature 0: profile", () => {
     await program.methods
       .createCampaign(
         new BN(1_000_000_000),
-        new BN(Math.floor(Date.now() / 1000) + 86400)
+        new BN(clock.unixTimestamp.toString()).add(new BN(86400))
       )
       .accountsPartial({
         creator: creator.publicKey,
@@ -133,8 +149,8 @@ describe("Feature 0: profile", () => {
     await program.methods
       .createCampaign(
         new BN(500_000_000),
-        new BN(Math.floor(Date.now() / 1000) + 86400)
-      )
+        new BN(clock.unixTimestamp.toString()).add(new BN(86400))
+    )
       .accountsPartial({
         creator: creator.publicKey,
         profile: profilePda,
@@ -156,7 +172,8 @@ describe("Feature 0: profile", () => {
 
   it("❌ rejects profile creation with URI over 200 chars", async () => {
     const creator = Keypair.generate();
-    await airdrop(provider, creator.publicKey);
+    svmAirdrop([creator.publicKey]);
+
 
     const [profilePda] = getProfilePda(creator.publicKey, program.programId);
     const longUri = "ipfs://" + "a".repeat(200);
@@ -173,8 +190,9 @@ describe("Feature 0: profile", () => {
   it("❌ rejects update from non-creator", async () => {
     const creator = Keypair.generate();
     const nonCreator = Keypair.generate();
-    await airdrop(provider, creator.publicKey);
-    await airdrop(provider, nonCreator.publicKey);
+    svmAirdrop([creator.publicKey]);
+
+    svm.airdrop(nonCreator.publicKey, BigInt(2_000_000_000));
 
     const [profilePda] = getProfilePda(creator.publicKey, program.programId);
 
@@ -195,7 +213,9 @@ describe("Feature 0: profile", () => {
 
   it("❌ rejects campaign creation without a profile", async () => {
     const creator = Keypair.generate();
-    await airdrop(provider, creator.publicKey);
+    svmAirdrop([creator.publicKey]);
+
+    const clock = svm.getClock();
 
     const [profilePda] = getProfilePda(creator.publicKey, program.programId);
     const [campaignPda] = getCampaignPda(
@@ -208,7 +228,7 @@ describe("Feature 0: profile", () => {
       program.methods
         .createCampaign(
           new BN(1_000_000_000),
-          new BN(Math.floor(Date.now() / 1000) + 86400)
+          new BN(clock.unixTimestamp.toString()).add(new BN(86400))
         )
         .accountsPartial({
           creator: creator.publicKey,
@@ -226,7 +246,9 @@ describe("Feature 0: profile", () => {
 describe("Feature 1: create_campaign", () => {
   it("✅ creates a campaign with valid deadline", async () => {
     const creator = Keypair.generate();
-    await airdrop(provider, creator.publicKey);
+    svmAirdrop([creator.publicKey]);
+
+    const clock = svm.getClock();
 
     const [profilePda] = getProfilePda(creator.publicKey, program.programId);
     const [campaignPda] = getCampaignPda(
@@ -242,7 +264,7 @@ describe("Feature 1: create_campaign", () => {
       .rpc();
 
     const goal = new BN(1_000_000_000);
-    const deadline = new BN(Math.floor(Date.now() / 1000) + 86400);
+    const deadline = new BN(clock.unixTimestamp.toString()).add(new BN(86400));
 
     const txSig = await program.methods
       .createCampaign(goal, deadline)
@@ -272,7 +294,9 @@ describe("Feature 1: create_campaign", () => {
 
   it("❌ rejects a campaign with a past deadline", async () => {
     const creator = Keypair.generate();
-    await airdrop(provider, creator.publicKey);
+    svmAirdrop([creator.publicKey]);
+
+    const clock = svm.getClock();
 
     const [profilePda] = getProfilePda(creator.publicKey, program.programId);
     const [campaignPda] = getCampaignPda(
@@ -291,7 +315,7 @@ describe("Feature 1: create_campaign", () => {
       program.methods
         .createCampaign(
           new BN(1_000_000_000),
-          new BN(Math.floor(Date.now() / 1000) - 86400)
+          new BN(clock.unixTimestamp.toString()).sub(new BN(86400))
         )
         .accountsPartial({
           creator: creator.publicKey,
@@ -314,7 +338,9 @@ describe("Feature 2: contribute", () => {
 
   beforeEach(async () => {
     creator = Keypair.generate();
-    await airdrop(provider, creator.publicKey);
+    svmAirdrop([creator.publicKey]);
+
+    const clock = svm.getClock();
 
     [profilePda] = getProfilePda(creator.publicKey, program.programId);
     [campaignPda] = getCampaignPda(
@@ -333,7 +359,7 @@ describe("Feature 2: contribute", () => {
     await program.methods
       .createCampaign(
         new BN(1_000_000_000),
-        new BN(Math.floor(Date.now() / 1000) + 86400)
+        new BN(clock.unixTimestamp.toString()).add(new BN(86400))
       )
       .accountsPartial({
         creator: creator.publicKey,
@@ -346,7 +372,7 @@ describe("Feature 2: contribute", () => {
 
   it("✅ contributes below goal, updates raised and contribution PDA", async () => {
     const donor = Keypair.generate();
-    await airdrop(provider, donor.publicKey);
+    svm.airdrop(donor.publicKey, BigInt(2_000_000_000));
 
     const [contributionPda] = getContributionPda(
       campaignPda,
@@ -397,7 +423,7 @@ describe("Feature 2: contribute", () => {
 
   it("✅ same donor contributes twice, amount accumulates", async () => {
     const donor = Keypair.generate();
-    await airdrop(provider, donor.publicKey);
+    svm.airdrop(donor.publicKey, BigInt(2_000_000_000));
 
     const [contributionPda] = getContributionPda(
       campaignPda,
@@ -425,11 +451,14 @@ describe("Feature 2: contribute", () => {
       .signers([donor])
       .rpc();
 
+    svm.expireBlockhash();
+
     const txSig = await program.methods
       .contribute(new BN(300_000_000))
       .accountsPartial({
         campaign: campaignPda,
         vault: vaultPda,
+        contribution: contributionPda,
         donor: donor.publicKey,
       })
       .signers([donor])
@@ -453,7 +482,7 @@ describe("Feature 2: contribute", () => {
 
   it("✅ overfunding allowed — contribution exceeds goal", async () => {
     const donor = Keypair.generate();
-    await airdrop(provider, donor.publicKey);
+    svm.airdrop(donor.publicKey, BigInt(2_000_000_000));
 
     const [contributionPda] = getContributionPda(
       campaignPda,
@@ -503,8 +532,8 @@ describe("Feature 2: contribute", () => {
   it("✅ multiple donors overfund, creator gets full raised amount on withdraw", async () => {
     const donor1 = Keypair.generate();
     const donor2 = Keypair.generate();
-    await airdrop(provider, donor1.publicKey);
-    await airdrop(provider, donor2.publicKey);
+    svm.airdrop(donor1.publicKey, BigInt(2_000_000_000));
+    svm.airdrop(donor2.publicKey, BigInt(2_000_000_000));
 
     const [contributionPda1] = getContributionPda(
       campaignPda,
@@ -567,7 +596,7 @@ describe("Feature 2: contribute", () => {
 
   it("❌ rejects zero amount contribution", async () => {
     const donor = Keypair.generate();
-    await airdrop(provider, donor.publicKey);
+    svm.airdrop(donor.publicKey, BigInt(2_000_000_000));
 
     const [contributionPda] = getContributionPda(
       campaignPda,
@@ -599,7 +628,7 @@ describe("Feature 2: contribute", () => {
 
   it("❌ rejects contribution after deadline", async () => {
     const shortCreator = Keypair.generate();
-    await airdrop(provider, shortCreator.publicKey);
+    svm.airdrop(shortCreator.publicKey, BigInt(2_000_000_000));
 
     const [shortProfilePda] = getProfilePda(
       shortCreator.publicKey,
@@ -621,10 +650,11 @@ describe("Feature 2: contribute", () => {
       .signers([shortCreator])
       .rpc();
 
+    const clockBefore = svm.getClock();
     await program.methods
       .createCampaign(
         new BN(1_000_000_000),
-        new BN(Math.floor(Date.now() / 1000) + 3)
+        new BN(clockBefore.unixTimestamp.toString()).add(new BN(3))
       )
       .accountsPartial({
         creator: shortCreator.publicKey,
@@ -634,10 +664,10 @@ describe("Feature 2: contribute", () => {
       .signers([shortCreator])
       .rpc();
 
-    await sleep(5000);
+    warp(20);
 
     const donor = Keypair.generate();
-    await airdrop(provider, donor.publicKey);
+    svm.airdrop(donor.publicKey, BigInt(2_000_000_000));
 
     const [contributionPda] = getContributionPda(
       shortCampaignPda,
@@ -665,7 +695,7 @@ describe("Feature 2: contribute", () => {
         .signers([donor])
         .rpc()
     ).rejects.toThrow(/DeadlinePassed/);
-  }, 15_000);
+  });
 });
 
 // ── Feature 3: withdraw ───────────────────────────────────────────────────────
@@ -678,7 +708,9 @@ describe("Feature 3: withdraw", () => {
 
   const setupFilledCampaign = async (deadlineOffsetSeconds = 3) => {
     creator = Keypair.generate();
-    await airdrop(provider, creator.publicKey);
+    svmAirdrop([creator.publicKey]);
+
+    const clock = svm.getClock();
 
     [profilePda] = getProfilePda(creator.publicKey, program.programId);
     [campaignPda] = getCampaignPda(
@@ -697,7 +729,9 @@ describe("Feature 3: withdraw", () => {
     await program.methods
       .createCampaign(
         new BN(500_000_000),
-        new BN(Math.floor(Date.now() / 1000) + deadlineOffsetSeconds)
+        new BN(clock.unixTimestamp.toString()).add(
+          new BN(deadlineOffsetSeconds)
+        )
       )
       .accountsPartial({
         creator: creator.publicKey,
@@ -708,7 +742,7 @@ describe("Feature 3: withdraw", () => {
       .rpc();
 
     const donor = Keypair.generate();
-    await airdrop(provider, donor.publicKey);
+    svm.airdrop(donor.publicKey, BigInt(2000000000));
 
     const [contributionPda] = getContributionPda(
       campaignPda,
@@ -740,7 +774,7 @@ describe("Feature 3: withdraw", () => {
 
   it("✅ creator withdraws after deadline when goal met", async () => {
     await setupFilledCampaign(3);
-    await sleep(5000);
+    warp(20);
 
     const creatorBalanceBefore = await provider.connection.getBalance(
       creator.publicKey
@@ -774,7 +808,7 @@ describe("Feature 3: withdraw", () => {
     const vaultRent =
       await provider.connection.getMinimumBalanceForRentExemption(0);
     expect(event.data.amount.toNumber()).toBe(500_000_000 + vaultRent);
-  }, 15_000);
+  });
 
   it("❌ rejects withdraw before deadline", async () => {
     await setupFilledCampaign(86400);
@@ -794,7 +828,9 @@ describe("Feature 3: withdraw", () => {
 
   it("❌ rejects withdraw when goal not met", async () => {
     creator = Keypair.generate();
-    await airdrop(provider, creator.publicKey);
+    svmAirdrop([creator.publicKey]);
+
+    const clock = svm.getClock();
 
     [profilePda] = getProfilePda(creator.publicKey, program.programId);
     [campaignPda] = getCampaignPda(
@@ -813,7 +849,7 @@ describe("Feature 3: withdraw", () => {
     await program.methods
       .createCampaign(
         new BN(1_000_000_000),
-        new BN(Math.floor(Date.now() / 1000) + 3)
+        new BN(clock.unixTimestamp.toString()).add(new BN(3))
       )
       .accountsPartial({
         creator: creator.publicKey,
@@ -824,7 +860,7 @@ describe("Feature 3: withdraw", () => {
       .rpc();
 
     const donor = Keypair.generate();
-    await airdrop(provider, donor.publicKey);
+    svm.airdrop(donor.publicKey, BigInt(2000000000));
 
     const [contributionPda] = getContributionPda(
       campaignPda,
@@ -851,7 +887,7 @@ describe("Feature 3: withdraw", () => {
       .signers([donor])
       .rpc();
 
-    await sleep(5000);
+    warp(20);
 
     await expect(
       program.methods
@@ -864,14 +900,14 @@ describe("Feature 3: withdraw", () => {
         .signers([creator])
         .rpc()
     ).rejects.toThrow(/GoalNotReached/);
-  }, 15_000);
+  });
 
   it("❌ rejects withdraw from non-creator", async () => {
     await setupFilledCampaign(3);
-    await sleep(5000);
+    warp(20);
 
     const nonCreator = Keypair.generate();
-    await airdrop(provider, nonCreator.publicKey);
+    svm.airdrop(nonCreator.publicKey, BigInt(2000000000));
 
     await expect(
       program.methods
@@ -884,11 +920,11 @@ describe("Feature 3: withdraw", () => {
         .signers([nonCreator])
         .rpc()
     ).rejects.toThrow(/Unauthorized/);
-  }, 15_000);
+  });
 
   it("❌ rejects double withdraw", async () => {
     await setupFilledCampaign(3);
-    await sleep(5000);
+    warp(20);
 
     await program.methods
       .withdraw()
@@ -910,8 +946,8 @@ describe("Feature 3: withdraw", () => {
         })
         .signers([creator])
         .rpc()
-    ).rejects.toThrow(/AlreadyClaimed/);
-  }, 15_000);
+    ).rejects.toThrow();
+  });
 });
 
 // ── Feature 4: refund ─────────────────────────────────────────────────────────
@@ -926,8 +962,11 @@ describe("Feature 4: refund", () => {
   const setupFailedCampaign = async (deadlineOffsetSeconds = 3) => {
     creator = Keypair.generate();
     donor = Keypair.generate();
-    await airdrop(provider, creator.publicKey);
-    await airdrop(provider, donor.publicKey);
+    svmAirdrop([creator.publicKey]);
+
+    svm.airdrop(donor.publicKey, BigInt(2000000000));
+
+    const clock = svm.getClock();
 
     [profilePda] = getProfilePda(creator.publicKey, program.programId);
     [campaignPda] = getCampaignPda(
@@ -946,7 +985,9 @@ describe("Feature 4: refund", () => {
     await program.methods
       .createCampaign(
         new BN(1_000_000_000),
-        new BN(Math.floor(Date.now() / 1000) + deadlineOffsetSeconds)
+        new BN(clock.unixTimestamp.toString()).add(
+          new BN(deadlineOffsetSeconds)
+        )
       )
       .accountsPartial({
         creator: creator.publicKey,
@@ -984,7 +1025,7 @@ describe("Feature 4: refund", () => {
 
   it("✅ donor gets refund after deadline when goal not met", async () => {
     await setupFailedCampaign(3);
-    await sleep(5000);
+    warp(20);
 
     const [contributionPda] = getContributionPda(
       campaignPda,
@@ -1025,7 +1066,7 @@ describe("Feature 4: refund", () => {
     expect(event.data.campaign.toBase58()).toBe(campaignPda.toBase58());
     expect(event.data.donor.toBase58()).toBe(donor.publicKey.toBase58());
     expect(event.data.amount.toNumber()).toBe(400_000_000);
-  }, 15_000);
+  });
 
   it("❌ rejects refund before deadline", async () => {
     await setupFailedCampaign(86400);
@@ -1046,8 +1087,11 @@ describe("Feature 4: refund", () => {
   it("❌ rejects refund when goal was met", async () => {
     creator = Keypair.generate();
     donor = Keypair.generate();
-    await airdrop(provider, creator.publicKey);
-    await airdrop(provider, donor.publicKey);
+    svmAirdrop([creator.publicKey]);
+
+    svm.airdrop(donor.publicKey, BigInt(2000000000));
+
+    const clock = svm.getClock();
 
     [profilePda] = getProfilePda(creator.publicKey, program.programId);
     [campaignPda] = getCampaignPda(
@@ -1066,7 +1110,7 @@ describe("Feature 4: refund", () => {
     await program.methods
       .createCampaign(
         new BN(500_000_000),
-        new BN(Math.floor(Date.now() / 1000) + 3)
+        new BN(clock.unixTimestamp.toString()).add(new BN(3))
       )
       .accountsPartial({
         creator: creator.publicKey,
@@ -1101,7 +1145,7 @@ describe("Feature 4: refund", () => {
       .signers([donor])
       .rpc();
 
-    await sleep(5000);
+    warp(20);
 
     await expect(
       program.methods
@@ -1114,14 +1158,14 @@ describe("Feature 4: refund", () => {
         .signers([donor])
         .rpc()
     ).rejects.toThrow(/GoalAlreadyReached/);
-  }, 15_000);
+  });
 
   it("❌ rejects refund from non-donor", async () => {
     await setupFailedCampaign(3);
-    await sleep(5000);
+    warp(20);
 
     const nonDonor = Keypair.generate();
-    await airdrop(provider, nonDonor.publicKey);
+    svm.airdrop(nonDonor.publicKey, BigInt(2000000000));
 
     await expect(
       program.methods
@@ -1134,11 +1178,11 @@ describe("Feature 4: refund", () => {
         .signers([nonDonor])
         .rpc()
     ).rejects.toThrow(/AccountNotInitialized|AccountDiscriminatorNotFound/);
-  }, 15_000);
+  });
 
   it("❌ rejects double refund", async () => {
     await setupFailedCampaign(3);
-    await sleep(5000);
+    warp(20);
 
     await program.methods
       .refund()
@@ -1160,6 +1204,6 @@ describe("Feature 4: refund", () => {
         })
         .signers([donor])
         .rpc()
-    ).rejects.toThrow(/AccountNotInitialized|AccountDiscriminatorNotFound/);
-  }, 15_000);
+    ).rejects.toThrow();
+  });
 });

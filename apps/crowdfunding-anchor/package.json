@@ -6,7 +6,8 @@
     "build": "anchor build",
     "test": "anchor test",
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
-    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check"
+    "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
@@ -17,6 +18,7 @@
     "@jest/types": "^29.0.0",
     "@types/bn.js": "^5.1.0",
     "@types/jest": "^29.0.3",
+    "anchor-litesvm": "^0.2.1",
     "jest": "^29.0.3",
     "prettier": "^2.6.2",
     "ts-jest": "^29.0.2",
