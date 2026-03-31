@@ -20,4 +20,4 @@ cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "pnpm exec jest --runInBand"
+test = "pnpm exec jest --runInBand --verbose"
