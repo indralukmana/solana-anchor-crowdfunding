@@ -215,6 +215,7 @@ cd apps/crowdfunding-anchor
 solana config set --url devnet
 
 # Fund your wallet (if needed)
+# if doesn't work then can use https://faucet.solana.com
 solana airdrop 2
 
 # Deploy
