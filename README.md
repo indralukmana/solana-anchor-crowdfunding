@@ -128,25 +128,31 @@ erDiagram
 
 ## Project Structure
 
+This project is a monorepo managed by `pnpm` workspaces.
+
 ```txt
-programs/crowdfunding/src/
-├── lib.rs                      # Program entry point and instruction dispatchers
-├── error.rs                    # Custom error codes
-├── state/
-│   ├── mod.rs
-│   ├── creator_profile.rs      # CreatorProfile account struct
-│   ├── campaign.rs             # Campaign account struct
-│   └── contribution.rs         # Contribution account struct
-└── instructions/
-    ├── mod.rs
-    ├── create_profile.rs       # Register a creator profile
-    ├── update_profile.rs       # Update creator metadata URI
-    ├── create_campaign.rs      # Launch a new campaign
-    ├── contribute.rs           # Donate SOL to a campaign
-    ├── withdraw.rs             # Creator claims funds after success
-    └── refund.rs               # Donor reclaims contribution after failure
-tests/
-└── crowdfunding.test.ts        # Full integration test suite (24 tests)
+apps/
+└── crowdfunding-anchor/
+    ├── programs/crowdfunding/src/ # Program logic (Rust/Anchor)
+    │   ├── lib.rs                 # Program entry point
+    │   ├── error.rs               # Custom error codes
+    │   ├── state/                 # Account structs
+    │   └── instructions/          # Instruction handlers
+    └── tests/                     # LiteSVM-powered test suite
+        ├── crowdfunding.000.profile.test.ts
+        ├── crowdfunding.001.campaign.test.ts
+        ├── crowdfunding.002.contribute.test.ts
+        ├── crowdfunding.003.withdraw.test.ts
+        ├── crowdfunding.004.refund.test.ts
+        └── utils.ts
+packages/
+└── crowdfunding-sdk/             # TypeScript SDK for the program
+    └── src/
+        ├── index.ts               # Main entry point
+        ├── pda.ts                 # PDA derivation helpers
+        ├── events.ts              # Event parsing utilities
+        ├── types/                 # Generated types from IDL
+        └── idl/                   # Program IDL
 ```
 
 ## Prerequisites
@@ -159,39 +165,52 @@ tests/
 ## Setup
 
 ```bash
-# Install JS dependencies
+# Install dependencies for all workspaces
 pnpm install
 
-# Build the program
-anchor build
+# Build all packages and the program
+pnpm build
+```
 
-# Get your program ID
+The program is located in `apps/crowdfunding-anchor`. After building, you can find the program ID:
+
+```bash
+cd apps/crowdfunding-anchor
 anchor keys list
 ```
 
-Update `declare_id!("...")` in `programs/crowdfunding/src/lib.rs` and `[programs.localnet]` in `Anchor.toml` with the output from `anchor keys list`, then rebuild:
+Update `declare_id!("...")` in `apps/crowdfunding-anchor/programs/crowdfunding/src/lib.rs` and `[programs.localnet]` in `apps/crowdfunding-anchor/Anchor.toml` with the output from `anchor keys list`, then rebuild:
 
 ```bash
-anchor build
+pnpm build
 ```
 
 ## Running Tests
 
+Tests are powered by [Anchor LiteSVM](https://github.com/LiteSVM/anchor-litesvm) with [LiteSVM](https://github.com/LiteSVM/litesvm) underneath, allowing for extremely fast execution without needing a local validator.
+
 ```bash
-# All-in-one (starts validator, runs tests, stops validator)
+# Run all tests (program + SDK)
+pnpm test
+
+# Or run tests specifically in the anchor app
+cd apps/crowdfunding-anchor
 anchor test
-
-# Or manually:
-# Terminal 1 — start local validator
-solana-test-validator --reset
-
-# Terminal 2 — run tests against running validator
-anchor test --skip-local-validator
 ```
+
+The test suite is split into specialized files for better readability and maintainability:
+
+- `profile`: Profile creation and metadata updates
+- `campaign`: Campaign initialization logic
+- `contribute`: Donation flow
+- `withdraw`: Campaign creator withdrawal flows
+- `refund`: Donor refund flow for failed campaign
 
 ## Deployment
 
 ```bash
+cd apps/crowdfunding-anchor
+
 # Switch to devnet
 solana config set --url devnet
 
