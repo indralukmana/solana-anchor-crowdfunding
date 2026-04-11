@@ -2,8 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Program, AnchorProvider, type Wallet } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
-import CrowdfundingIdl from "@/lib/crowdfunding/idl.json";
-import { getProfilePda } from "@/lib/crowdfunding/pda";
+import { CrowdfundingIdl, getProfilePda } from "@crowdfunding/sdk";
 import { PROGRAM_ID } from "@/lib/crowdfunding/constants";
 import type { Crowdfunding } from "@crowdfunding/sdk";
 import type { CreatorProfile } from "@/lib/crowdfunding/types";
@@ -24,11 +23,9 @@ export function useProfile(creator?: PublicKey) {
     queryFn: async () => {
       if (!target) throw new Error("No creator address provided");
 
-      const provider = new AnchorProvider(
-        connection,
-        dummyWallet,
-        { commitment: "confirmed" },
-      );
+      const provider = new AnchorProvider(connection, dummyWallet, {
+        commitment: "confirmed",
+      });
       const program = new Program(CrowdfundingIdl as Crowdfunding, provider);
 
       const [profilePda] = getProfilePda(target, PROGRAM_ID);

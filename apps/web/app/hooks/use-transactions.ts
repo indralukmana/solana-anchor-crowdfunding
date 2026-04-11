@@ -1,13 +1,13 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Program, AnchorProvider, BN, web3 } from "@coral-xyz/anchor";
-import CrowdfundingIdl from "@/lib/crowdfunding/idl.json";
 import {
+  CrowdfundingIdl,
   getProfilePda,
   getCampaignPda,
   getVaultPda,
   getContributionPda,
-} from "@/lib/crowdfunding/pda";
+} from "@crowdfunding/sdk";
 import { PROGRAM_ID } from "@/lib/crowdfunding/constants";
 import type { Crowdfunding } from "@crowdfunding/sdk";
 import type { CreatorProfile } from "@/lib/crowdfunding/types";

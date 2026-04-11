@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { Program, AnchorProvider, type Wallet } from "@coral-xyz/anchor";
-import CrowdfundingIdl from "@/lib/crowdfunding/idl.json";
+import { CrowdfundingIdl } from "@crowdfunding/sdk";
 import { PROGRAM_ID } from "@/lib/crowdfunding/constants";
 import type { Crowdfunding } from "@crowdfunding/sdk";
 
