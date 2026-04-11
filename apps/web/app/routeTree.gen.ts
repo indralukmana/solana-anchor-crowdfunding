@@ -1,5 +1,3 @@
-/* prettier-ignore-start */
-
 /* eslint-disable */
 
 // @ts-nocheck
@@ -10,95 +8,144 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Route as rootRoute } from './routes/__root'
-import { Route as IndexImport } from './routes/index'
-import { Route as ProfileImport } from './routes/profile'
-import { Route as CreateImport } from './routes/create'
-import { Route as ProfileCreateImport } from './routes/profile.create'
-import { Route as CampaignAddressImport } from './routes/campaign.$address'
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as CreateRouteImport } from './routes/create'
+import { Route as IndexRouteImport } from './routes/index'
+import { Route as ProfileCreateRouteImport } from './routes/profile.create'
+import { Route as CampaignAddressRouteImport } from './routes/campaign.$address'
 
-// Create/Update Routes
-
-const IndexRoute = IndexImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRoute,
-} as any)
-
-const ProfileRoute = ProfileImport.update({
+const ProfileRoute = ProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
-
-const CreateRoute = CreateImport.update({
+const CreateRoute = CreateRouteImport.update({
   id: '/create',
   path: '/create',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
-
-const ProfileCreateRoute = ProfileCreateImport.update({
-  id: '/profile/create',
-  path: '/profile/create',
-  getParentRoute: () => rootRoute,
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
 } as any)
-
-const CampaignAddressRoute = CampaignAddressImport.update({
+const ProfileCreateRoute = ProfileCreateRouteImport.update({
+  id: '/create',
+  path: '/create',
+  getParentRoute: () => ProfileRoute,
+} as any)
+const CampaignAddressRoute = CampaignAddressRouteImport.update({
   id: '/campaign/$address',
   path: '/campaign/$address',
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => rootRouteImport,
 } as any)
 
-// Populate the FileRoutesByPath interface
+export interface FileRoutesByFullPath {
+  '/': typeof IndexRoute
+  '/create': typeof CreateRoute
+  '/profile': typeof ProfileRouteWithChildren
+  '/campaign/$address': typeof CampaignAddressRoute
+  '/profile/create': typeof ProfileCreateRoute
+}
+export interface FileRoutesByTo {
+  '/': typeof IndexRoute
+  '/create': typeof CreateRoute
+  '/profile': typeof ProfileRouteWithChildren
+  '/campaign/$address': typeof CampaignAddressRoute
+  '/profile/create': typeof ProfileCreateRoute
+}
+export interface FileRoutesById {
+  __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
+  '/create': typeof CreateRoute
+  '/profile': typeof ProfileRouteWithChildren
+  '/campaign/$address': typeof CampaignAddressRoute
+  '/profile/create': typeof ProfileCreateRoute
+}
+export interface FileRouteTypes {
+  fileRoutesByFullPath: FileRoutesByFullPath
+  fullPaths:
+    | '/'
+    | '/create'
+    | '/profile'
+    | '/campaign/$address'
+    | '/profile/create'
+  fileRoutesByTo: FileRoutesByTo
+  to: '/' | '/create' | '/profile' | '/campaign/$address' | '/profile/create'
+  id:
+    | '__root__'
+    | '/'
+    | '/create'
+    | '/profile'
+    | '/campaign/$address'
+    | '/profile/create'
+  fileRoutesById: FileRoutesById
+}
+export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
+  CreateRoute: typeof CreateRoute
+  ProfileRoute: typeof ProfileRouteWithChildren
+  CampaignAddressRoute: typeof CampaignAddressRoute
+}
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexImport
-      parentRoute: typeof rootRoute
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/create': {
       id: '/create'
       path: '/create'
       fullPath: '/create'
-      preLoaderRoute: typeof CreateImport
-      parentRoute: typeof rootRoute
+      preLoaderRoute: typeof CreateRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/profile': {
-      id: '/profile'
-      path: '/profile'
-      fullPath: '/profile'
-      preLoaderRoute: typeof ProfileImport
-      parentRoute: typeof rootRoute
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profile/create': {
+      id: '/profile/create'
+      path: '/create'
+      fullPath: '/profile/create'
+      preLoaderRoute: typeof ProfileCreateRouteImport
+      parentRoute: typeof ProfileRoute
     }
     '/campaign/$address': {
       id: '/campaign/$address'
       path: '/campaign/$address'
       fullPath: '/campaign/$address'
-      preLoaderRoute: typeof CampaignAddressImport
-      parentRoute: typeof rootRoute
-    }
-    '/profile/create': {
-      id: '/profile/create'
-      path: '/profile/create'
-      fullPath: '/profile/create'
-      preLoaderRoute: typeof ProfileCreateImport
-      parentRoute: typeof rootRoute
+      preLoaderRoute: typeof CampaignAddressRouteImport
+      parentRoute: typeof rootRouteImport
     }
   }
 }
 
-// Create and export the route tree
+interface ProfileRouteChildren {
+  ProfileCreateRoute: typeof ProfileCreateRoute
+}
 
-export const routeTree = rootRoute.addChildren([
-  IndexRoute,
-  CreateRoute,
-  ProfileRoute,
-  CampaignAddressRoute,
-  ProfileCreateRoute,
-])
+const ProfileRouteChildren: ProfileRouteChildren = {
+  ProfileCreateRoute: ProfileCreateRoute,
+}
 
-/* prettier-ignore-end */
+const ProfileRouteWithChildren =
+  ProfileRoute._addFileChildren(ProfileRouteChildren)
+
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  CreateRoute: CreateRoute,
+  ProfileRoute: ProfileRouteWithChildren,
+  CampaignAddressRoute: CampaignAddressRoute,
+}
+export const routeTree = rootRouteImport
+  ._addFileChildren(rootRouteChildren)
+  ._addFileTypes<FileRouteTypes>()

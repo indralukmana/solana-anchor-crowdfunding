@@ -5,7 +5,12 @@ import viteTsConfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
   plugins: [
-    TanStackRouterVite({ target: "react", autoCodeSplitting: true }),
+    TanStackRouterVite({
+      target: "react",
+      autoCodeSplitting: true,
+      routesDirectory: "./app/routes",
+      generatedRouteTree: "./app/routeTree.gen.ts",
+    }),
     react(),
     viteTsConfigPaths({
       projects: ["./tsconfig.json"],
