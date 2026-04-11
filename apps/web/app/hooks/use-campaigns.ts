@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { Program, AnchorProvider, type Wallet } from "@coral-xyz/anchor";
-import { CrowdfundingIdl } from "@crowdfunding/sdk";
+import CrowdfundingIdl from "@/lib/crowdfunding/idl.json";
 import { PROGRAM_ID } from "@/lib/crowdfunding/constants";
 import type { Crowdfunding } from "@crowdfunding/sdk";
 import type { Campaign } from "@/lib/crowdfunding/types";
