@@ -6,6 +6,10 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "anchor:build": "cd apps/crowdfunding-anchor && anchor build",
+    "sdk:sync": "pnpm --filter @crowdfunding/sdk sync",
+    "sdk:build": "pnpm --filter @crowdfunding/sdk build",
+    "program:build": "pnpm anchor:build && pnpm sdk:sync && pnpm sdk:build"
   }
 }

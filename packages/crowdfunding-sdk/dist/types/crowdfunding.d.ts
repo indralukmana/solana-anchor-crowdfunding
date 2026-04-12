@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/crowdfunding.json`.
  */
 export type Crowdfunding = {
-    "address": "3qUXqi2J3W9juVRqZNrwjpH9WPfzx8wHaPAboXVJVPpp";
+    "address": "CYHkx1NUFKahYj4esTR6iuk5MnTZgCKsxufbD2cdK94k";
     "metadata": {
         "name": "crowdfunding";
         "version": "0.1.0";

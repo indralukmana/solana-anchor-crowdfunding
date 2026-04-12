@@ -5,12 +5,11 @@ package_manager = "pnpm"
 resolution = true
 skip-lint = false
 
-[programs.localnet]
-crowdfunding = "3qUXqi2J3W9juVRqZNrwjpH9WPfzx8wHaPAboXVJVPpp"
-
 [programs.devnet]
 crowdfunding = "3qUXqi2J3W9juVRqZNrwjpH9WPfzx8wHaPAboXVJVPpp"
 
+[programs.localnet]
+crowdfunding = "CYHkx1NUFKahYj4esTR6iuk5MnTZgCKsxufbD2cdK94k"
 
 [registry]
 url = "https://api.apr.dev"

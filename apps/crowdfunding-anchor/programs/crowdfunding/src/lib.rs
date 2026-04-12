@@ -9,7 +9,7 @@ pub use event::*;
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("3qUXqi2J3W9juVRqZNrwjpH9WPfzx8wHaPAboXVJVPpp");
+declare_id!("CYHkx1NUFKahYj4esTR6iuk5MnTZgCKsxufbD2cdK94k");
 
 #[program]
 pub mod crowdfunding {
