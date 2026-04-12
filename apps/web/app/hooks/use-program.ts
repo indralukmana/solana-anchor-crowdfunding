@@ -1,8 +1,7 @@
 import { useMemo } from "react";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { Program, AnchorProvider, type Wallet } from "@coral-xyz/anchor";
-import { CrowdfundingIdl } from "@crowdfunding/sdk";
-import { PROGRAM_ID } from "@/lib/crowdfunding/constants";
+import { CrowdfundingIdl, PROGRAM_ID } from "@crowdfunding/sdk";
 import type { Crowdfunding } from "@crowdfunding/sdk";
 
 const dummyWallet: Wallet = {
@@ -20,6 +19,6 @@ export function useProgram() {
       dummyWallet,
       { commitment: "confirmed" },
     );
-    return new Program(CrowdfundingIdl as Crowdfunding, provider);
+    return new Program<Crowdfunding>(CrowdfundingIdl as Crowdfunding, provider);
   }, [connection]);
 }

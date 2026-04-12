@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { formatSol, formatAddress, formatDate } from "@/utils/format";
-import type { Campaign } from "@/lib/crowdfunding/types";
+import type { Campaign } from "@crowdfunding/sdk";
 import type { PublicKey } from "@solana/web3.js";
 
 interface CampaignCardProps {

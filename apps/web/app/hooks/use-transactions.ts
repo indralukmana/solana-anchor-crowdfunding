@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnection, useWallet, type WalletContextState } from "@solana/wallet-adapter-react";
+import type { Connection } from "@solana/web3.js";
 import { Program, AnchorProvider, BN, web3 } from "@coral-xyz/anchor";
 import {
   CrowdfundingIdl,
@@ -7,15 +8,12 @@ import {
   getCampaignPda,
   getVaultPda,
   getContributionPda,
+  PROGRAM_ID,
 } from "@crowdfunding/sdk";
-import { PROGRAM_ID } from "@/lib/crowdfunding/constants";
 import type { Crowdfunding } from "@crowdfunding/sdk";
-import type { CreatorProfile } from "@/lib/crowdfunding/types";
+import { toast } from "sonner";
 
-function useProgramWithWallet() {
-  const { connection } = useConnection();
-  const wallet = useWallet();
-
+function buildProgram(connection: Connection, wallet: WalletContextState) {
   if (!wallet.publicKey || !wallet.signTransaction) {
     throw new Error("Wallet not connected");
   }
@@ -23,23 +21,24 @@ function useProgramWithWallet() {
   const provider = new AnchorProvider(connection, wallet as any, {
     commitment: "confirmed",
   });
-  return new Program(CrowdfundingIdl as Crowdfunding, provider);
+  return new Program<Crowdfunding>(CrowdfundingIdl as Crowdfunding, provider);
 }
 
 export function useCreateProfile() {
   const queryClient = useQueryClient();
   const wallet = useWallet();
+  const { connection } = useConnection();
 
   return useMutation({
     mutationFn: async (metadataUri: string) => {
       if (!wallet.publicKey) throw new Error("Wallet not connected");
-      const program = useProgramWithWallet();
+      const program = buildProgram(connection, wallet);
 
       const [profilePda] = getProfilePda(wallet.publicKey, PROGRAM_ID);
 
       const tx = await program.methods
         .createProfile(metadataUri)
-        .accounts({
+        .accountsPartial({
           profile: profilePda,
           creator: wallet.publicKey,
           systemProgram: web3.SystemProgram.programId,
@@ -51,23 +50,27 @@ export function useCreateProfile() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["profile"] });
     },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Transaction failed");
+    },
   });
 }
 
 export function useUpdateProfile() {
   const queryClient = useQueryClient();
   const wallet = useWallet();
+  const { connection } = useConnection();
 
   return useMutation({
     mutationFn: async (metadataUri: string) => {
       if (!wallet.publicKey) throw new Error("Wallet not connected");
-      const program = useProgramWithWallet();
+      const program = buildProgram(connection, wallet);
 
       const [profilePda] = getProfilePda(wallet.publicKey, PROGRAM_ID);
 
       const tx = await program.methods
         .updateProfile(metadataUri)
-        .accounts({
+        .accountsPartial({
           profile: profilePda,
           creator: wallet.publicKey,
         })
@@ -78,22 +81,24 @@ export function useUpdateProfile() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["profile"] });
     },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Transaction failed");
+    },
   });
 }
 
 export function useCreateCampaign() {
   const queryClient = useQueryClient();
   const wallet = useWallet();
+  const { connection } = useConnection();
 
   return useMutation({
     mutationFn: async (input: { goal: number; deadline: number }) => {
       if (!wallet.publicKey) throw new Error("Wallet not connected");
-      const program = useProgramWithWallet();
+      const program = buildProgram(connection, wallet);
 
       const [profilePda] = getProfilePda(wallet.publicKey, PROGRAM_ID);
-      const profile = (await (
-        program.account as Record<string, { fetch: (addr: web3.PublicKey) => Promise<CreatorProfile> }>
-      ).creatorProfile.fetch(profilePda));
+      const profile = await program.account.creatorProfile.fetch(profilePda);
 
       const [campaignPda] = getCampaignPda(
         wallet.publicKey,
@@ -104,7 +109,7 @@ export function useCreateCampaign() {
 
       const tx = await program.methods
         .createCampaign(new BN(input.goal), new BN(input.deadline))
-        .accounts({
+        .accountsPartial({
           profile: profilePda,
           campaign: campaignPda,
           vault: vaultPda,
@@ -119,12 +124,16 @@ export function useCreateCampaign() {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
       queryClient.invalidateQueries({ queryKey: ["profile"] });
     },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Transaction failed");
+    },
   });
 }
 
 export function useContribute() {
   const queryClient = useQueryClient();
   const wallet = useWallet();
+  const { connection } = useConnection();
 
   return useMutation({
     mutationFn: async (input: {
@@ -132,7 +141,7 @@ export function useContribute() {
       amount: number;
     }) => {
       if (!wallet.publicKey) throw new Error("Wallet not connected");
-      const program = useProgramWithWallet();
+      const program = buildProgram(connection, wallet);
 
       const [contributionPda] = getContributionPda(
         input.campaignPda,
@@ -143,7 +152,7 @@ export function useContribute() {
 
       const tx = await program.methods
         .contribute(new BN(input.amount))
-        .accounts({
+        .accountsPartial({
           campaign: input.campaignPda,
           contribution: contributionPda,
           vault: vaultPda,
@@ -161,17 +170,21 @@ export function useContribute() {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
       queryClient.invalidateQueries({ queryKey: ["contribution"] });
     },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Transaction failed");
+    },
   });
 }
 
 export function useInitializeContribution() {
   const queryClient = useQueryClient();
   const wallet = useWallet();
+  const { connection } = useConnection();
 
   return useMutation({
     mutationFn: async (campaignPda: web3.PublicKey) => {
       if (!wallet.publicKey) throw new Error("Wallet not connected");
-      const program = useProgramWithWallet();
+      const program = buildProgram(connection, wallet);
 
       const [contributionPda] = getContributionPda(
         campaignPda,
@@ -181,7 +194,7 @@ export function useInitializeContribution() {
 
       const tx = await program.methods
         .initializeContribution()
-        .accounts({
+        .accountsPartial({
           campaign: campaignPda,
           contribution: contributionPda,
           donor: wallet.publicKey,
@@ -196,23 +209,27 @@ export function useInitializeContribution() {
         queryKey: ["contribution", campaignPda.toBase58()],
       });
     },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Transaction failed");
+    },
   });
 }
 
 export function useWithdraw() {
   const queryClient = useQueryClient();
   const wallet = useWallet();
+  const { connection } = useConnection();
 
   return useMutation({
     mutationFn: async (campaignPda: web3.PublicKey) => {
       if (!wallet.publicKey) throw new Error("Wallet not connected");
-      const program = useProgramWithWallet();
+      const program = buildProgram(connection, wallet);
 
       const [vaultPda] = getVaultPda(campaignPda, PROGRAM_ID);
 
       const tx = await program.methods
         .withdraw()
-        .accounts({
+        .accountsPartial({
           campaign: campaignPda,
           vault: vaultPda,
           creator: wallet.publicKey,
@@ -228,17 +245,21 @@ export function useWithdraw() {
       });
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
     },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Transaction failed");
+    },
   });
 }
 
 export function useRefund() {
   const queryClient = useQueryClient();
   const wallet = useWallet();
+  const { connection } = useConnection();
 
   return useMutation({
     mutationFn: async (campaignPda: web3.PublicKey) => {
       if (!wallet.publicKey) throw new Error("Wallet not connected");
-      const program = useProgramWithWallet();
+      const program = buildProgram(connection, wallet);
 
       const [vaultPda] = getVaultPda(campaignPda, PROGRAM_ID);
       const [contributionPda] = getContributionPda(
@@ -249,7 +270,7 @@ export function useRefund() {
 
       const tx = await program.methods
         .refund()
-        .accounts({
+        .accountsPartial({
           campaign: campaignPda,
           vault: vaultPda,
           contribution: contributionPda,
@@ -266,6 +287,9 @@ export function useRefund() {
       });
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
       queryClient.invalidateQueries({ queryKey: ["contribution"] });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Transaction failed");
     },
   });
 }
