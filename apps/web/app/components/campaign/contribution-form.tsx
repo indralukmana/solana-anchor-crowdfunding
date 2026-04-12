@@ -21,6 +21,8 @@ export function ContributionForm({ campaignPda }: ContributionFormProps) {
   const contribute = useContribute();
 
   const isPending = init.isPending || contribute.isPending;
+  const isError = init.isError || contribute.isError;
+  const error = contribute.error || init.error;
 
   if (!publicKey) {
     return (
@@ -39,14 +41,18 @@ export function ContributionForm({ campaignPda }: ContributionFormProps) {
     const lamports = Number(amount) * 1e9;
     if (!lamports || lamports <= 0) return;
 
-    if (!contribution) {
-      await init.mutateAsync(campaignPda);
+    try {
+      if (!contribution) {
+        await init.mutateAsync(campaignPda);
+      }
+      await contribute.mutateAsync({
+        campaignPda,
+        amount: lamports,
+      });
+      setAmount("");
+    } catch {
+      // Errors are displayed via mutation.isError + toast
     }
-    await contribute.mutateAsync({
-      campaignPda,
-      amount: lamports,
-    });
-    setAmount("");
   };
 
   return (
@@ -73,6 +79,11 @@ export function ContributionForm({ campaignPda }: ContributionFormProps) {
               required
             />
           </div>
+          {isError && (
+            <p className="text-sm text-destructive">
+              {error instanceof Error ? error.message : "Transaction failed"}
+            </p>
+          )}
           <Button type="submit" disabled={isPending} className="w-full shadow-sm">
             {isPending ? "Processing..." : contribution ? "Contribute" : "Initialize & Contribute"}
           </Button>

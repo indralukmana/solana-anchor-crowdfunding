@@ -6,8 +6,12 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { SolanaProvider } from "@/components/solana/solana-provider";
+import { Toaster } from "sonner";
 import { WalletButton } from "@/components/solana/wallet-button";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { TanStackDevtools } from "@tanstack/react-devtools";
+import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools";
+import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -68,6 +72,12 @@ function RootComponent() {
                 >
                   Profile
                 </Link>
+                <Link
+                  to="/program"
+                  className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  Program
+                </Link>
                 <WalletButton />
               </nav>
             </div>
@@ -88,7 +98,14 @@ function RootComponent() {
               Crowdfunding dApp — Built on Solana
             </div>
           </footer>
+          <TanStackDevtools
+            plugins={[
+              { name: "TanStack Query", render: <ReactQueryDevtoolsPanel /> },
+              { name: "TanStack Router", render: <TanStackRouterDevtoolsPanel /> },
+            ]}
+          />
         </div>
+          <Toaster richColors />
       </SolanaProvider>
     </QueryClientProvider>
   );

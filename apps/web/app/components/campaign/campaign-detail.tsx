@@ -167,30 +167,44 @@ export function CampaignDetail({ address }: CampaignDetailProps) {
 }
 
 function WithdrawButton({ campaignPda }: { campaignPda: PublicKey }) {
-  const { mutate, isPending } = useWithdraw();
+  const { mutate, isPending, isError, error } = useWithdraw();
 
   return (
-    <Button
-      onClick={() => mutate(campaignPda)}
-      disabled={isPending}
-      className="shadow-sm"
-    >
-      {isPending ? "Withdrawing..." : "Withdraw"}
-    </Button>
+    <div className="space-y-2">
+      <Button
+        onClick={() => mutate(campaignPda)}
+        disabled={isPending}
+        className="shadow-sm"
+      >
+        {isPending ? "Withdrawing..." : "Withdraw"}
+      </Button>
+      {isError && (
+        <p className="text-sm text-destructive">
+          {error instanceof Error ? error.message : "Transaction failed"}
+        </p>
+      )}
+    </div>
   );
 }
 
 function RefundButton({ campaignPda }: { campaignPda: PublicKey }) {
-  const { mutate, isPending } = useRefund();
+  const { mutate, isPending, isError, error } = useRefund();
 
   return (
-    <Button
-      variant="outline"
-      onClick={() => mutate(campaignPda)}
-      disabled={isPending}
-      className="shadow-sm"
-    >
-      {isPending ? "Processing..." : "Request Refund"}
-    </Button>
+    <div className="space-y-2">
+      <Button
+        variant="outline"
+        onClick={() => mutate(campaignPda)}
+        disabled={isPending}
+        className="shadow-sm"
+      >
+        {isPending ? "Processing..." : "Request Refund"}
+      </Button>
+      {isError && (
+        <p className="text-sm text-destructive">
+          {error instanceof Error ? error.message : "Transaction failed"}
+        </p>
+      )}
+    </div>
   );
 }

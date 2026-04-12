@@ -9,12 +9,19 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ProgramRouteImport } from './routes/program'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as CreateRouteImport } from './routes/create'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ProfileCreateRouteImport } from './routes/profile.create'
+import { Route as ProfileIndexRouteImport } from './routes/profile/index'
+import { Route as ProfileCreateRouteImport } from './routes/profile/create'
 import { Route as CampaignAddressRouteImport } from './routes/campaign.$address'
 
+const ProgramRoute = ProgramRouteImport.update({
+  id: '/program',
+  path: '/program',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProfileRoute = ProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
@@ -29,6 +36,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const ProfileIndexRoute = ProfileIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ProfileRoute,
 } as any)
 const ProfileCreateRoute = ProfileCreateRouteImport.update({
   id: '/create',
@@ -45,23 +57,28 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/create': typeof CreateRoute
   '/profile': typeof ProfileRouteWithChildren
+  '/program': typeof ProgramRoute
   '/campaign/$address': typeof CampaignAddressRoute
   '/profile/create': typeof ProfileCreateRoute
+  '/profile/': typeof ProfileIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/create': typeof CreateRoute
-  '/profile': typeof ProfileRouteWithChildren
+  '/program': typeof ProgramRoute
   '/campaign/$address': typeof CampaignAddressRoute
   '/profile/create': typeof ProfileCreateRoute
+  '/profile': typeof ProfileIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/create': typeof CreateRoute
   '/profile': typeof ProfileRouteWithChildren
+  '/program': typeof ProgramRoute
   '/campaign/$address': typeof CampaignAddressRoute
   '/profile/create': typeof ProfileCreateRoute
+  '/profile/': typeof ProfileIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -69,28 +86,46 @@ export interface FileRouteTypes {
     | '/'
     | '/create'
     | '/profile'
+    | '/program'
     | '/campaign/$address'
     | '/profile/create'
+    | '/profile/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/create' | '/profile' | '/campaign/$address' | '/profile/create'
+  to:
+    | '/'
+    | '/create'
+    | '/program'
+    | '/campaign/$address'
+    | '/profile/create'
+    | '/profile'
   id:
     | '__root__'
     | '/'
     | '/create'
     | '/profile'
+    | '/program'
     | '/campaign/$address'
     | '/profile/create'
+    | '/profile/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CreateRoute: typeof CreateRoute
   ProfileRoute: typeof ProfileRouteWithChildren
+  ProgramRoute: typeof ProgramRoute
   CampaignAddressRoute: typeof CampaignAddressRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/program': {
+      id: '/program'
+      path: '/program'
+      fullPath: '/program'
+      preLoaderRoute: typeof ProgramRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/profile': {
       id: '/profile'
       path: '/profile'
@@ -112,6 +147,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/profile/': {
+      id: '/profile/'
+      path: '/'
+      fullPath: '/profile/'
+      preLoaderRoute: typeof ProfileIndexRouteImport
+      parentRoute: typeof ProfileRoute
+    }
     '/profile/create': {
       id: '/profile/create'
       path: '/create'
@@ -131,10 +173,12 @@ declare module '@tanstack/react-router' {
 
 interface ProfileRouteChildren {
   ProfileCreateRoute: typeof ProfileCreateRoute
+  ProfileIndexRoute: typeof ProfileIndexRoute
 }
 
 const ProfileRouteChildren: ProfileRouteChildren = {
   ProfileCreateRoute: ProfileCreateRoute,
+  ProfileIndexRoute: ProfileIndexRoute,
 }
 
 const ProfileRouteWithChildren =
@@ -144,6 +188,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CreateRoute: CreateRoute,
   ProfileRoute: ProfileRouteWithChildren,
+  ProgramRoute: ProgramRoute,
   CampaignAddressRoute: CampaignAddressRoute,
 }
 export const routeTree = rootRouteImport

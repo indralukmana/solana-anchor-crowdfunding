@@ -23,11 +23,12 @@ export function CreateProfileForm() {
     );
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!metadataUri) return;
-    await create.mutateAsync(metadataUri);
-    navigate({ to: "/profile" });
+    create.mutate(metadataUri, {
+      onSuccess: () => navigate({ to: "/profile" }),
+    });
   };
 
   return (
@@ -48,6 +49,11 @@ export function CreateProfileForm() {
               A link to your creator metadata (JSON).
             </p>
           </div>
+          {create.isError && (
+            <p className="text-sm text-destructive">
+              {create.error instanceof Error ? create.error.message : "Transaction failed"}
+            </p>
+          )}
           <Button type="submit" disabled={create.isPending} className="w-full shadow-sm">
             {create.isPending ? "Creating..." : "Create Profile"}
           </Button>

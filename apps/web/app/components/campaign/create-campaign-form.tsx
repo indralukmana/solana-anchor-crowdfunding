@@ -50,15 +50,16 @@ export function CreateCampaignForm() {
     );
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const goalLamports = Number(goal) * 1e9;
     const deadlineTs = Math.floor(new Date(deadline).getTime() / 1000);
     if (!goalLamports || !deadlineTs) return;
 
-    const tx = await create.mutateAsync({ goal: goalLamports, deadline: deadlineTs });
-    // On success, navigate home
-    navigate({ to: "/" });
+    create.mutate(
+      { goal: goalLamports, deadline: deadlineTs },
+      { onSuccess: () => navigate({ to: "/" }) },
+    );
   };
 
   return (
@@ -90,6 +91,11 @@ export function CreateCampaignForm() {
               required
             />
           </div>
+          {create.isError && (
+            <p className="text-sm text-destructive">
+              {create.error instanceof Error ? create.error.message : "Transaction failed"}
+            </p>
+          )}
           <Button type="submit" disabled={create.isPending} className="w-full shadow-sm">
             {create.isPending ? "Creating..." : "Launch Campaign"}
           </Button>

@@ -50,12 +50,15 @@ export function ProfileCard() {
     );
   }
 
-  const handleUpdate = async (e: React.FormEvent) => {
+  const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!metadataUri) return;
-    await update.mutateAsync(metadataUri);
-    setEditing(false);
-    setMetadataUri("");
+    update.mutate(metadataUri, {
+      onSuccess: () => {
+        setEditing(false);
+        setMetadataUri("");
+      },
+    });
   };
 
   return (
@@ -96,6 +99,11 @@ export function ProfileCard() {
                 />
               </div>
               <div className="flex gap-3">
+              {update.isError && (
+                <p className="text-sm text-destructive">
+                  {update.error instanceof Error ? update.error.message : "Transaction failed"}
+                </p>
+              )}
                 <Button type="submit" disabled={update.isPending} className="shadow-sm">
                   {update.isPending ? "Saving..." : "Save"}
                 </Button>
