@@ -1,11 +1,13 @@
 name: Deploy web to Cloudflare Pages
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
       - "apps/web/**"
       - "packages/crowdfunding-sdk/**"
+      - ".github/workflows/**"
       - "pnpm-lock.yaml"
   pull_request:
     paths:
