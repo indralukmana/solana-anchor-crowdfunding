@@ -1,10 +1,10 @@
 # Solana Crowdfunding
 
-A crowdfunding smart contract on Solana built with the Anchor framework. Creators register a profile, launch campaigns with a funding goal and deadline, and receive funds only if the goal is met. Contributions are locked in a system-owned PDA vault — never held directly by the program. If the goal is not met, donors can reclaim their contributions after the deadline.
+A crowdfunding smart contract on Solana built with Anchor. Creators register a profile, launch campaigns with a funding goal and deadline, and receive funds only if the goal is met. Contributions sit in a system-owned PDA vault — the program never holds them directly. If the goal isn't met, donors can reclaim their contributions after the deadline.
 
-Overfunding is intentionally allowed — contributors can donate beyond the goal, and the creator receives the full raised amount.
+Overfunding is intentional — contributors can donate beyond the goal, and the creator receives the full raised amount.
 
-## How It Works
+## How it works
 
 ```mermaid
 sequenceDiagram
@@ -19,9 +19,12 @@ sequenceDiagram
     Creator->>Program: create_campaign(goal, deadline)
     Program-->>Creator: Campaign PDA initialized, campaign_count++
 
+    Donor->>Program: initialize_contribution()
+    Program-->>Donor: Contribution PDA created (zero balance)
+
     Donor->>Program: contribute(amount)
     Program->>Vault (PDA): Lock SOL
-    Program-->>Donor: Contribution PDA created/updated
+    Program-->>Donor: Contribution PDA updated
 
     alt Goal met (raised >= goal) after deadline
         Creator->>Program: withdraw()
@@ -34,7 +37,7 @@ sequenceDiagram
     end
 ```
 
-## Campaign Lifecycle
+## Campaign lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -49,7 +52,7 @@ stateDiagram-v2
     Refunded --> [*]
 ```
 
-## Account Structure
+## Account structure
 
 ```mermaid
 erDiagram
@@ -83,23 +86,25 @@ erDiagram
 
 ## Instructions
 
-| Instruction       | Caller  | Conditions                             | Effect                                                      |
-| ----------------- | ------- | -------------------------------------- | ----------------------------------------------------------- |
-| `create_profile`  | Anyone  | Profile does not exist yet             | Initializes `CreatorProfile` PDA with metadata URI          |
-| `update_profile`  | Creator | Profile exists, caller is creator      | Updates `metadata_uri` on existing profile                  |
-| `create_campaign` | Creator | Profile exists, deadline in the future | Initializes `Campaign` PDA, increments `campaign_count`     |
-| `contribute`      | Anyone  | Before deadline                        | Locks SOL in vault, updates `raised` and `Contribution` PDA |
-| `withdraw`        | Creator | After deadline, `raised >= goal`       | Drains vault to creator, marks campaign `claimed`           |
-| `refund`          | Donor   | After deadline, `raised < goal`        | Returns donor's SOL, closes `Contribution` PDA              |
+| Instruction               | Caller  | Conditions                                | Effect                                                  |
+| ------------------------- | ------- | ----------------------------------------- | ------------------------------------------------------- |
+| `create_profile`          | Anyone  | Profile does not exist yet                | Initializes `CreatorProfile` PDA with metadata URI      |
+| `update_profile`          | Creator | Profile exists, caller is creator         | Updates `metadata_uri` on existing profile              |
+| `create_campaign`         | Creator | Profile exists, deadline in the future    | Initializes `Campaign` PDA, increments `campaign_count` |
+| `initialize_contribution` | Donor   | Campaign exists                           | Creates `Contribution` PDA with zero balance            |
+| `contribute`              | Donor   | Before deadline, contribution PDA exists  | Locks SOL in vault, updates `raised` and contribution   |
+| `withdraw`                | Creator | After deadline, `raised >= goal`          | Drains vault to creator, marks campaign `claimed`       |
+| `refund`                  | Donor   | After deadline, `raised < goal`           | Returns donor's SOL, closes `Contribution` PDA          |
 
-## Contribution Rules
+## Contribution rules
 
-- Overfunding is **allowed** — a donor can contribute any amount regardless of the current `raised` vs `goal`
-- A donor can contribute **multiple times**; amounts accumulate in their `Contribution` PDA
-- The only restriction is the deadline — no contributions accepted after it passes
-- Minimum contribution is **1 lamport** (zero-amount contributions are rejected)
+- A donor must call `initialize_contribution` before their first `contribute` to a campaign. This creates the `Contribution` PDA that tracks their balance.
+- Overfunding is allowed — a donor can contribute any amount regardless of current `raised` vs `goal`.
+- A donor can contribute multiple times; amounts accumulate in their `Contribution` PDA.
+- The only restriction is the deadline — no contributions accepted after it passes.
+- Minimum contribution is 1 lamport. Zero-amount contributions are rejected.
 
-## PDA Seeds
+## PDA seeds
 
 | Account          | Seeds                                                      |
 | ---------------- | ---------------------------------------------------------- |
@@ -108,9 +113,23 @@ erDiagram
 | `Vault`          | `["vault", campaign_pubkey]`                               |
 | `Contribution`   | `["contribution", campaign_pubkey, donor_pubkey]`          |
 
-> `campaign_id` equals the creator's `campaign_count` value at the time of campaign creation, encoded as 8-byte little-endian. Clients should read `profile.campaign_count` before calling `create_campaign` to derive the next campaign PDA.
+`campaign_id` equals the creator's `campaign_count` at the time of campaign creation, encoded as 8-byte little-endian. Read `profile.campaign_count` before calling `create_campaign` to derive the next campaign PDA.
 
-## Error Reference
+## Events
+
+The program emits Anchor events on every state change. Parse them from transaction logs using the SDK's `parseEvents` helper (see [SDK](#sdk)).
+
+| Event                     | Fields                                                |
+| ------------------------- | ----------------------------------------------------- |
+| `ProfileCreated`          | `creator`, `metadata_uri`                             |
+| `ProfileUpdated`          | `creator`, `metadata_uri`                             |
+| `CampaignCreated`         | `creator`, `campaign`, `campaign_id`, `goal`, `deadline` |
+| `ContributionInitialized` | `campaign`, `donor`                                   |
+| `ContributionMade`        | `campaign`, `donor`, `amount`, `total_raised`         |
+| `FundsWithdrawn`          | `campaign`, `creator`, `amount`                       |
+| `RefundIssued`            | `campaign`, `donor`, `amount`                         |
+
+## Error reference
 
 | Error                   | Cause                                     |
 | ----------------------- | ----------------------------------------- |
@@ -126,34 +145,73 @@ erDiagram
 | `ZeroAmount`            | Contribution amount is zero               |
 | `CampaignCountOverflow` | Creator has created `u64::MAX` campaigns  |
 
-## Project Structure
+## Project structure
 
-This project is a monorepo managed by `pnpm` workspaces.
+A monorepo managed by pnpm workspaces.
 
 ```txt
 apps/
-└── crowdfunding-anchor/
-    ├── programs/crowdfunding/src/ # Program logic (Rust/Anchor)
-    │   ├── lib.rs                 # Program entry point
-    │   ├── error.rs               # Custom error codes
-    │   ├── state/                 # Account structs
-    │   └── instructions/          # Instruction handlers
-    └── tests/                     # LiteSVM-powered test suite
-        ├── crowdfunding.000.profile.test.ts
-        ├── crowdfunding.001.campaign.test.ts
-        ├── crowdfunding.002.contribute.test.ts
-        ├── crowdfunding.003.withdraw.test.ts
-        ├── crowdfunding.004.refund.test.ts
-        └── utils.ts
+├── crowdfunding-anchor/
+│   ├── programs/crowdfunding/src/  # Program logic (Rust/Anchor)
+│   │   ├── lib.rs                  # Program entry point
+│   │   ├── error.rs                # Custom error codes
+│   │   ├── event.rs                # Anchor event definitions
+│   │   ├── state/                  # Account structs
+│   │   └── instructions/           # Instruction handlers
+│   └── tests/                      # LiteSVM-powered test suite
+│       ├── crowdfunding.000.profile.test.ts
+│       ├── crowdfunding.001.campaign.test.ts
+│       ├── crowdfunding.002.contribute.test.ts
+│       ├── crowdfunding.003.withdraw.test.ts
+│       ├── crowdfunding.004.refund.test.ts
+│       └── utils.ts
+└── web/                            # React frontend (Vite + TanStack Router)
+    └── app/
+        ├── routes/                 # File-based routes
+        │   ├── __root.tsx
+        │   ├── index.tsx           # Campaign listing
+        │   ├── create.tsx          # Create campaign
+        │   ├── campaign.$address.tsx  # Campaign detail
+        │   ├── profile.tsx         # Profile layout
+        │   ├── program.tsx         # Program info
+        │   └── profile/
+        │       ├── index.tsx       # View/edit profile
+        │       └── create.tsx      # Create profile
+        ├── components/
+        │   ├── campaign/           # CampaignCard, CampaignList, CampaignDetail, ContributionForm, CreateCampaignForm
+        │   ├── profile/            # ProfileCard, CreateProfileForm
+        │   ├── program/            # ProgramDetail
+        │   ├── solana/             # SolanaProvider, WalletButton
+        │   └── ui/                 # Button, Card, Input, Label, Progress, Skeleton
+        ├── hooks/                  # React Query hooks
+        │   ├── use-campaign.ts
+        │   ├── use-campaigns.ts
+        │   ├── use-contribution.ts
+        │   ├── use-profile.ts
+        │   ├── use-program.ts
+        │   ├── use-program-info.ts
+        │   └── use-transactions.ts
+        └── utils/                  # cn (classnames), format helpers
 packages/
-└── crowdfunding-sdk/             # TypeScript SDK for the program
+└── crowdfunding-sdk/               # TypeScript SDK
     └── src/
-        ├── index.ts               # Main entry point
-        ├── pda.ts                 # PDA derivation helpers
-        ├── events.ts              # Event parsing utilities
-        ├── types/                 # Generated types from IDL
-        └── idl/                   # Program IDL
+        ├── index.ts                # Re-exports everything
+        ├── pda.ts                  # PDA derivation helpers
+        ├── events.ts               # Event parsing utilities
+        ├── types/                  # Generated types from IDL
+        └── idl/                    # Program IDL (JSON)
 ```
+
+## SDK
+
+The `@crowdfunding/sdk` package (`packages/crowdfunding-sdk`) is the TypeScript client for the program. The web app imports it as a workspace dependency.
+
+**Exports:**
+
+- **PDA helpers** — `getProfilePda`, `getCampaignPda`, `getVaultPda`, `getContributionPda`. Each takes the required public keys and the program ID, returns `[PublicKey, bump]`.
+- **Event parsing** — `parseEvents(provider, program, txSignature)` fetches a confirmed transaction and returns decoded Anchor events. `findEvent(events, name)` looks up an event by name or throws.
+- **Types** — Generated TypeScript types matching the on-chain account structs and instruction arguments.
+- **IDL** — The program IDL as a JSON object (`CrowdfundingIdl`), plus the `PROGRAM_ID` constant derived from it.
 
 ## Prerequisites
 
@@ -168,43 +226,47 @@ packages/
 # Install dependencies for all workspaces
 pnpm install
 
-# Build all packages and the program
+# Build everything (packages + program)
 pnpm build
 ```
 
-The program is located in `apps/crowdfunding-anchor`. After building, you can find the program ID:
+Targeted scripts in the root `package.json`:
+
+| Script               | What it does                                                        |
+| -------------------- | ------------------------------------------------------------------- |
+| `pnpm program:build` | Builds the Anchor program, syncs the IDL into the SDK, builds SDK  |
+| `pnpm sdk:sync`      | Copies the latest IDL from the program build into the SDK package   |
+| `pnpm sdk:build`     | Builds only the SDK package                                         |
+
+The program lives in `apps/crowdfunding-anchor`. After building, get your program ID:
 
 ```bash
 cd apps/crowdfunding-anchor
 anchor keys list
 ```
 
-Update `declare_id!("...")` in `apps/crowdfunding-anchor/programs/crowdfunding/src/lib.rs` and `[programs.localnet]` in `apps/crowdfunding-anchor/Anchor.toml` with the output from `anchor keys list`, then rebuild:
+Update `declare_id!("...")` in `programs/crowdfunding/src/lib.rs` and `[programs.localnet]` in `Anchor.toml` with the output, then rebuild.
 
-```bash
-pnpm build
-```
+## Running tests
 
-## Running Tests
-
-Tests are powered by [Anchor LiteSVM](https://github.com/LiteSVM/anchor-litesvm) with [LiteSVM](https://github.com/LiteSVM/litesvm) underneath, allowing for extremely fast execution without needing a local validator.
+Tests run on [Anchor LiteSVM](https://github.com/LiteSVM/anchor-litesvm) with [LiteSVM](https://github.com/LiteSVM/litesvm) underneath — no local validator needed.
 
 ```bash
 # Run all tests (program + SDK)
 pnpm test
 
-# Or run tests specifically in the anchor app
+# Or just the program tests
 cd apps/crowdfunding-anchor
 anchor test
 ```
 
-The test suite is split into specialized files for better readability and maintainability:
+Test files:
 
-- `profile`: Profile creation and metadata updates
-- `campaign`: Campaign initialization logic
-- `contribute`: Donation flow
-- `withdraw`: Campaign creator withdrawal flows
-- `refund`: Donor refund flow for failed campaign
+- `profile` — Profile creation and metadata updates
+- `campaign` — Campaign initialization
+- `contribute` — Donation flow
+- `withdraw` — Creator withdrawal
+- `refund` — Donor refund for failed campaigns
 
 ## Deployment
 
@@ -221,11 +283,11 @@ solana airdrop 2
 # Deploy
 anchor deploy --provider.cluster devnet
 
-# Verify deployment
+# Verify
 solana program show <PROGRAM_ID> --url devnet
 ```
 
-## Deployment Info
+## Deployment info
 
 |                |                                                                                                           |
 | -------------- | --------------------------------------------------------------------------------------------------------- |
