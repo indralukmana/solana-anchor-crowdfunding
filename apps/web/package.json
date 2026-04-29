@@ -8,6 +8,7 @@
     "preview": "vite preview",
     "check:ts": "tsc --noEmit",
     "deploy": "pnpm dlx wrangler pages deploy dist --project-name=crowdfunding-web"
+  },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
     "@crowdfunding/sdk": "workspace:*",
