@@ -5,6 +5,9 @@ import viteTsConfigPaths from "vite-tsconfig-paths";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
+  define: {
+    global: "globalThis",
+  },
   plugins: [
     TanStackRouterVite({
       target: "react",
