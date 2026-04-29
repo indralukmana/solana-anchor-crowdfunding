@@ -268,7 +268,7 @@ Test files:
 - `withdraw` — Creator withdrawal
 - `refund` — Donor refund for failed campaigns
 
-## Deployment
+## Program deployment
 
 ```bash
 cd apps/crowdfunding-anchor
@@ -287,10 +287,68 @@ anchor deploy --provider.cluster devnet
 solana program show <PROGRAM_ID> --url devnet
 ```
 
+## Web frontend
+
+The React frontend (`apps/web`) is deployed to Cloudflare Pages via GitHub Actions. A push to `main` that touches `apps/web/` or `packages/crowdfunding-sdk/` triggers an automatic build and deploy.
+
+Preview deploys are created for pull requests at `<branch>.crowdfunding-web.pages.dev`.
+
+### One-time setup
+
+1. Create a Cloudflare API token: Dashboard > API Tokens > Create Token > Custom > `Account > Cloudflare Pages > Edit`
+2. Get your Account ID from the Cloudflare dashboard sidebar
+3. Create the Pages project: `pnpm dlx wrangler pages project create crowdfunding-web --production-branch=main`
+4. Add two GitHub repo secrets (`Settings > Secrets and variables > Actions`):
+   - `CLOUDFLARE_API_TOKEN`
+   - `CLOUDFLARE_ACCOUNT_ID`
+
+### Local manual deploy
+
+```bash
+# Authenticate once
+pnpm dlx wrangler login
+
+# Build and deploy
+pnpm --filter @crowdfunding/web build
+pnpm --filter @crowdfunding/web deploy
+```
+
+SPA routing works out of the box — Cloudflare Pages auto-detects a client-side router when there is no `404.html` and serves `index.html` for all unmatched paths.
+
 ## Deployment info
 
 |                |                                                                                                           |
 | -------------- | --------------------------------------------------------------------------------------------------------- |
 | **Network**    | Solana Devnet                                                                                             |
-| **Program ID** | `3qUXqi2J3W9juVRqZNrwjpH9WPfzx8wHaPAboXVJVPpp`                                                            |
-| **Solscan**    | [View on Solscan](https://solscan.io/account/3qUXqi2J3W9juVRqZNrwjpH9WPfzx8wHaPAboXVJVPpp?cluster=devnet) |
+| **Program ID** | `CYHkx1NUFKahYj4esTR6iuk5MnTZgCKsxufbD2cdK94k`                                                            |
+| **Solscan**    | [View on Solscan](https://solscan.io/account/CYHkx1NUFKahYj4esTR6iuk5MnTZgCKsxufbD2cdK94k?cluster=devnet) |
+
+
+## Browser compatibility
+
+Solana's web3.js and wallet adapter libraries use Node.js globals (`Buffer`, `process`, `global`) that do not exist in browsers. This project polyfills them in `apps/web/app/main.tsx` before anything else loads:
+
+```ts
+import { Buffer } from "buffer";
+import process from "process";
+globalThis.Buffer = Buffer;
+globalThis.process = process;
+```
+
+The Vite config also maps `global` to `globalThis`:
+
+```ts
+// apps/web/vite.config.ts
+define: {
+  global: "globalThis",
+}
+```
+
+If a new dependency triggers a `crypto is not defined` or `stream is not defined` error at runtime, add the corresponding alias to `vite.config.ts` and install the browser polyfill:
+
+| Missing module | Polyfill package       | Vite alias                                      |
+| -------------- | ---------------------- | ----------------------------------------------- |
+| `crypto`       | `crypto-browserify`    | `resolve: { alias: { crypto: "crypto-browserify" } }` |
+| `stream`       | `stream-browserify`    | `resolve: { alias: { stream: "stream-browserify" } }` |
+
+These are rarely needed in practice — most Solana wallet adapters have browser-native fallbacks. Only add them if you hit actual runtime errors.
